@@ -2,7 +2,7 @@
   "name": "electrode-redux-router-engine-redial",
   "version": "1.5.0",
   "description": "Redial support for electrode redux router engine",
-  "main": "lib/redux-router-engine-redial.js",
+  "main": "index.js",
   "scripts": {
     "test": "clap test",
     "lint": "clap lint",
