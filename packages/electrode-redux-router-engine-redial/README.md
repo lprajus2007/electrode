@@ -1,43 +1,29 @@
-# Electrode Redux Router Engine
+# Electrode Redux Router Engine - with support for Redial
 
-[![NPM version][npm-image]][npm-url] [![Dependency Status][daviddm-image]][daviddm-url] [![devDependency Status][daviddm-dev-image]][daviddm-dev-url] [![npm downloads][npm-downloads-image]][npm-downloads-url]
-
-Handle [react-router] routes matching and redirecting for [redux async actions] data for React Server Side Rendering using the [Redux Server Rendering] pattern.
+Refer to the original [Redial] repository for documentation
 
 ## Install
 
-```bash
-$ npm install -save electrode-redux-router-engine
+```
+npm install -save electrode-redux-router-engine-redial
 ```
 
-## Usage of APIs and Options
+## Usage
 
-This module is a part of the [Electrode Platform].
+Just pass an extra **"enableRedial"** flag to the options object either when calling the **electrode-redux-router-engine-redux** constructor (OR) while calling the render method.
 
-See documentation [here](https://electrode.gitbooks.io/electrode/content/chapter1/advanced/stand-alone-modules/redux-router-engine.html) for details on usage of APIs and options.
+```
+routerEngine = new ElectrodeReduxRouterEngineRedial({ routes, createReduxStore, enableRedial: true });
+```
 
-Built with :heart: by [Team Electrode](https://github.com/orgs/electrode-io/people) @WalmartLabs.
+**OR**
+
+```
+routerEngine.render(req, { enableRedial: true })
+```
+
+
+This module is **NOT** a part of the [Electrode Platform] yet. I will add more features and open a PR.
 
 [electrode platform]: http://www.electrode.io/
-
-[redux async actions]: http://redux.js.org/docs/advanced/AsyncActions.html
-
-[redux server rendering]: http://redux.js.org/docs/recipes/ServerRendering.html
-
-[react-router]: https://github.com/reactjs/react-router
-
-[npm-image]: https://badge.fury.io/js/electrode-redux-router-engine.svg
-
-[npm-url]: https://npmjs.org/package/electrode-redux-router-engine
-
-[daviddm-image]: https://david-dm.org/electrode-io/electrode/status.svg?path=packages/electrode-redux-router-engine
-
-[daviddm-url]: https://david-dm.org/electrode-io/electrode?path=packages/electrode-redux-router-engine
-
-[daviddm-dev-image]: https://david-dm.org/electrode-io/electrode/dev-status.svg?path=packages/electrode-redux-router-engine
-
-[daviddm-dev-url]: https://david-dm.org/electrode-io/electrode?path=packages/electrode-redux-router-engine?type-dev
-
-[npm-downloads-image]: https://img.shields.io/npm/dm/electrode-redux-router-engine.svg
-
-[npm-downloads-url]: https://www.npmjs.com/package/electrode-redux-router-engine
+[redial]: https://github.com/markdalgleish/redial
