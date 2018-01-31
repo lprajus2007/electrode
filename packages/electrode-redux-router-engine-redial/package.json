@@ -1,6 +1,6 @@
 {
   "name": "electrode-redux-router-engine-redial",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Redial support for electrode redux router engine",
   "main": "index.js",
   "scripts": {
