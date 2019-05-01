@@ -16,21 +16,15 @@
   ],
   "main": "server/index.js",
   "keywords": [
-    "e",
-    "l",
-    "c",
-    "t",
-    "r",
-    "o",
-    "d"
+    "electrode"
   ],
   "repository": {
     "type": "git",
     "url": "https://github.com/demo-app"
   },
   "engines": {
-    "node": "^4.x.x || ^6.x.x || ^7.x.x",
-    "npm": ">= 3.x.x"
+    "node": ">= 6",
+    "npm": ">= 3"
   },
   "scripts": {
     "prestart": "clap build",
@@ -48,7 +42,8 @@
     "electrode-redux-router-engine": "../../../packages/electrode-redux-router-engine",
     "electrode-server": "^1.0.0",
     "electrode-static-paths": "^1.0.0",
-    "lodash": "^4.10.1"
+    "lodash": "^4.10.1",
+    "demo-component": "../packages/demo-component"
   },
   "devDependencies": {
     "electrode-archetype-react-app-dev": "../../../packages/electrode-archetype-react-app-dev"

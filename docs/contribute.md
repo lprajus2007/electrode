@@ -1,19 +1,20 @@
-# Contribute
+# Contribute!
 
-If you are interested in helping out, here are the list of open [Issues](http://www.electrode.io/docs/contribute.html#issues) on the Electrode repos below and a running list of [Features](http://www.electrode.io/docs/contribute.html#features)
+If you are interested in contributing, check out the list of open [Issues](http://www.electrode.io/docs/contribute.html#issues) and [Features](http://www.electrode.io/docs/contribute.html#features).
 
-for contributors. Make an impact: Help to maintain Electrode and make it even greater.
+We encourage your contributions to the Electrode open source project! Make an impact! Help maintain Electrode and make it even greater.
 
-### Fix Issues
+### Open Issues
 
 ---
 
 [electrode](https://github.com/electrode-io/electrode)
 
-* [232](https://github.com/electrode-io/electrode/issues/232) Boilerplate not running in Production mode, test fails
-* [135](https://github.com/electrode-io/electrode/issues/135) \[HMR\] css are not updated in hot mode
+* [232](https://github.com/electrode-io/electrode/issues/232) The boilerplate is not running in Production mode and the test fails.
+* [135](https://github.com/electrode-io/electrode/issues/135) \[HMR\] The CSS files are not updated in hot mode.
 
-### Help With Features
+### Features
+The following is a list of features that you can contribute to.
 
 ---
 
@@ -37,4 +38,4 @@ for contributors. Make an impact: Help to maintain Electrode and make it even gr
 * [244](https://github.com/electrode-io/electrode/issues/244) upgrade react-hot-loader to version 3.x
 * [219](https://github.com/electrode-io/electrode/issues/219) Can we have an Electrode + Parse Server\(express.js\) sample project with SSR
 
-[See All](https://github.com/repos/electrode-io/electrode/issues%7B/number%7D)
+[See All](https://github.com/electrode-io/electrode/issues)

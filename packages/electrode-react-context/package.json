@@ -1,10 +1,11 @@
 {
   "name": "electrode-react-context",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "React HoC for providing app in the global context",
   "main": "lib/context-provider.js",
   "scripts": {
     "test": "clap check",
+    "coverage": "clap check",
     "format": "prettier --write --print-width 100 *.js `find . -type d -d 1 -exec echo '{}/**/*.js' \\; | egrep -v '(/node_modules/|/dist/|/coverage/)'`"
   },
   "keywords": [
@@ -17,6 +18,9 @@
     "url": "https://github.com/electrode-io/electrode.git"
   },
   "license": "Apache-2.0",
+  "files": [
+    "lib"
+  ],
   "peerDependencies": {
     "react": "^15.0.0 || ^0.14.0",
     "react-dom": "^15.0.0 || ^0.14.0"

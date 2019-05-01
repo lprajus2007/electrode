@@ -1,171 +1,86 @@
 "use strict";
 
 const _ = require("lodash");
-const Promise = require("bluebird");
-const fs = require("fs");
 const Path = require("path");
-const RenderContext = require("./render-context");
-const parseTemplate = require("./parse-template");
-const customToken = require("./custom-token");
-const loadHandler = require("./load-handler");
-const Renderer = require("./renderer");
+const assert = require("assert");
+const AsyncTemplate = require("./async-template");
+const { getOtherStats, getOtherAssets } = require("./utils");
 
-const HTTP_ERROR_500 = 500;
+const otherStats = getOtherStats();
+const {
+  resolveChunkSelector,
+  loadAssetsFromStats,
+  getStatsPath,
+  invokeTemplateProcessor
+} = require("./utils");
 
-const utils = require("./utils");
+function initializeTemplate({ htmlFile, tokenHandlers, cacheId, cacheKey, options }, routeOptions) {
+  cacheKey = cacheKey || (cacheId && `${htmlFile}#${cacheId}`) || htmlFile;
+  let asyncTemplate = routeOptions._templateCache[cacheKey];
+  if (asyncTemplate) {
+    return asyncTemplate;
+  }
 
-const resolveChunkSelector = utils.resolveChunkSelector;
-const loadAssetsFromStats = utils.loadAssetsFromStats;
-const getIconStats = utils.getIconStats;
-const getCriticalCSS = utils.getCriticalCSS;
-const getStatsPath = utils.getStatsPath;
+  if (options) {
+    routeOptions = Object.assign({}, routeOptions, options);
+  }
 
-const resolvePath = path => (!Path.isAbsolute(path) ? Path.resolve(path) : path);
+  const userTokenHandlers = []
+    .concat(tokenHandlers, routeOptions.tokenHandler, routeOptions.tokenHandlers)
+    .filter(x => x);
 
-function loadTokenHandler(path, options) {
-  const mod = loadHandler(path);
-  return mod(options);
-}
+  let finalTokenHandlers = userTokenHandlers;
 
-function makeRouteHandler(routeOptions, userContent) {
-  const WEBPACK_DEV = routeOptions.webpackDev;
-  const RENDER_JS = routeOptions.renderJS;
-  const RENDER_SS = routeOptions.serverSideRendering;
-  const html = fs.readFileSync(resolvePath(routeOptions.htmlFile)).toString();
-  const assets = routeOptions.__internals.assets;
-  const devBundleBase = routeOptions.__internals.devBundleBase;
-  const prodBundleBase = routeOptions.prodBundleBase;
-  const chunkSelector = routeOptions.__internals.chunkSelector;
-  const iconStats = getIconStats(routeOptions.iconStats);
-  const htmlTokens = parseTemplate(html);
-  const criticalCSS = getCriticalCSS(routeOptions.criticalCSS);
+  // Inject the built-in react/token-handlers if it is not in user's handlers
+  // and replaceTokenHandlers option is false
+  if (!routeOptions.replaceTokenHandlers) {
+    const reactTokenHandlers = Path.join(__dirname, "react/token-handlers");
+    finalTokenHandlers =
+      userTokenHandlers.indexOf(reactTokenHandlers) < 0
+        ? [reactTokenHandlers].concat(userTokenHandlers)
+        : userTokenHandlers;
+  }
 
-  const routeData = {
-    WEBPACK_DEV,
-    RENDER_JS,
-    RENDER_SS,
-    html,
-    assets,
-    devBundleBase,
-    prodBundleBase,
-    chunkSelector,
-    iconStats,
-    criticalCSS,
-    htmlTokens
-  };
-
-  const loadHandlerOptions = { routeOptions, routeData };
-
-  const tokenHandlers = [].concat(routeOptions.tokenHandler || []);
-  tokenHandlers.push(Path.join(__dirname, "default-handlers.js"));
-  routeData.tokenHandlers = tokenHandlers.map(h => loadTokenHandler(h, loadHandlerOptions));
-  routeData.tokenHandler = _.last(routeData.tokenHandlers);
-  customToken.loadAll(htmlTokens, loadHandlerOptions);
-
-  const renderer = new Renderer({
-    htmlTokens,
-    tokenHandlers: routeData.tokenHandlers
+  asyncTemplate = new AsyncTemplate({
+    htmlFile,
+    tokenHandlers: finalTokenHandlers.filter(x => x),
+    insertTokenIds: routeOptions.insertTokenIds,
+    routeOptions
   });
 
-  /* Create a route handler */
-  /* eslint max-statements: [2, 35] */
+  invokeTemplateProcessor(asyncTemplate, routeOptions);
+  asyncTemplate.initializeRenderer();
+
+  return (routeOptions._templateCache[cacheKey] = asyncTemplate);
+}
+
+function makeRouteHandler(routeOptions) {
+  routeOptions._templateCache = {};
+  const defaultSelection = { htmlFile: routeOptions.htmlFile };
+
+  const render = (options, templateSelection) => {
+    const asyncTemplate = initializeTemplate(templateSelection || defaultSelection, routeOptions);
+    return asyncTemplate.render(options);
+  };
+
   return options => {
-    const request = options.request;
-    const mode = options.mode;
-    let renderSs = RENDER_SS;
-    if (renderSs) {
-      if (mode === "noss") {
-        renderSs = false;
-      } else if (mode === "datass" && request.app) {
-        // signal user content callback to populate prefetch data only and skips actual SSR
-        request.app.ssrPrefetchOnly = true;
+    if (routeOptions.selectTemplate) {
+      const selection = routeOptions.selectTemplate(options.request, routeOptions);
+
+      if (selection && selection.then) {
+        return selection.then(x => render(options, x));
       }
+
+      return render(options, selection);
     }
 
-    const renderPage = content => {
-      // allow content to specifically turn off rendering index with render
-      // flag set to false
-      // content.html must be defined to render index
-      if (content.render === false || content.html === undefined) {
-        return Promise.resolve(content);
-      }
-
-      let cspScriptNonce;
-      let cspStyleNonce;
-      if (routeOptions.cspNonceValue !== undefined) {
-        const nonceObject = routeOptions.cspNonceValue;
-        if (typeof nonceObject === "function") {
-          cspScriptNonce = nonceObject(request, "script");
-          cspStyleNonce = nonceObject(request, "style");
-        } else {
-          cspScriptNonce = _.get(request, nonceObject.script, undefined);
-          cspStyleNonce = _.get(request, nonceObject.style, undefined);
-        }
-      }
-
-      const chunkNames = chunkSelector(request);
-      const devCSSBundle = chunkNames.css
-        ? `${devBundleBase}${chunkNames.css}.style.css`
-        : `${devBundleBase}style.css`;
-      const devJSBundle = chunkNames.js
-        ? `${devBundleBase}${chunkNames.js}.bundle.dev.js`
-        : `${devBundleBase}bundle.dev.js`;
-      const jsChunk = _.find(assets.js, asset => _.includes(asset.chunkNames, chunkNames.js));
-      const cssChunk = _.find(assets.css, asset => _.includes(asset.chunkNames, chunkNames.css));
-      const scriptNonce = cspScriptNonce ? ` nonce="${cspScriptNonce}"` : "";
-      const styleNonce = cspStyleNonce ? ` nonce="${cspStyleNonce}"` : "";
-
-      const renderJs = RENDER_JS && mode !== "nojs";
-
-      const context = new RenderContext({
-        request,
-        routeOptions,
-        routeData,
-        content,
-        data: {
-          mode,
-          renderJs,
-          renderSs,
-          scriptNonce,
-          styleNonce,
-          chunkNames,
-          devCSSBundle,
-          devJSBundle,
-          jsChunk,
-          cssChunk
-        },
-        user: {}
-      });
-
-      return renderer.render(context);
-    };
-
-    if (typeof userContent === "function") {
-      if (renderSs) {
-        // invoke user content as a function, which could return any content
-        // as static html or generated from react's renderToString
-        const x = userContent(request);
-        if (x.then) {
-          return x.then(renderPage).catch(err => {
-            if (!err.status) err.status = HTTP_ERROR_500;
-            throw err;
-          });
-        }
-        return renderPage(x);
-      } else {
-        userContent = "";
-      }
-    }
-
-    if (typeof userContent === "string") {
-      userContent = { status: 200, html: userContent };
-    }
-
-    return renderPage(userContent);
+    const asyncTemplate = initializeTemplate(defaultSelection, routeOptions);
+    return asyncTemplate.render(options);
   };
 }
 
 const setupOptions = options => {
+  const https = process.env.WEBPACK_DEV_HTTPS && process.env.WEBPACK_DEV_HTTPS !== "false";
   const pluginOptionsDefaults = {
     pageTitle: "Untitled Electrode Web Application",
     webpackDev: process.env.WEBPACK_DEV === "true",
@@ -173,9 +88,9 @@ const setupOptions = options => {
     serverSideRendering: true,
     htmlFile: Path.join(__dirname, "index.html"),
     devServer: {
-      host: process.env.WEBPACK_HOST || "127.0.0.1",
+      host: process.env.WEBPACK_DEV_HOST || process.env.WEBPACK_HOST || "127.0.0.1",
       port: process.env.WEBPACK_DEV_PORT || "2992",
-      https: Boolean(process.env.WEBPACK_DEV_HTTPS)
+      https
     },
     unbundledJS: {
       enterHead: [],
@@ -184,6 +99,7 @@ const setupOptions = options => {
     },
     paths: {},
     stats: "dist/server/stats.json",
+    otherStats,
     iconStats: "dist/server/iconstats.json",
     criticalCSS: "dist/js/critical.css",
     buildArtifacts: ".build",
@@ -193,44 +109,160 @@ const setupOptions = options => {
 
   const pluginOptions = _.defaultsDeep({}, options, pluginOptionsDefaults);
   const chunkSelector = resolveChunkSelector(pluginOptions);
-  const devProtocol = process.env.WEBPACK_DEV_HTTPS ? "https://" : "http://";
-  const devBundleBase = `${devProtocol}${pluginOptions.devServer.host}:${pluginOptions.devServer
-    .port}/js/`;
+  const devProtocol = https ? "https://" : "http://";
+  const devBundleBase = `${devProtocol}${pluginOptions.devServer.host}:${
+    pluginOptions.devServer.port
+  }/js/`;
   const statsPath = getStatsPath(pluginOptions.stats, pluginOptions.buildArtifacts);
 
   const assets = loadAssetsFromStats(statsPath);
-  pluginOptions.__internals = {
+  const otherAssets = getOtherAssets(pluginOptions);
+  pluginOptions.__internals = _.defaultsDeep({}, pluginOptions.__internals, {
     assets,
+    otherAssets,
     chunkSelector,
     devBundleBase
-  };
+  });
 
   return pluginOptions;
 };
 
+const pathSpecificOptions = [
+  "htmlFile",
+  "pageTitle",
+  "selectTemplate",
+  "responseForBadStatus",
+  "responseForError"
+];
+
 const setupPathOptions = (routeOptions, path) => {
-  const options = routeOptions.paths[path];
-  return _.defaults(
-    { htmlFile: options.htmlFile, tokenHandler: options.tokenHandler },
+  const pathData = _.get(routeOptions, ["paths", path], {});
+  const pathOptions = pathData.options;
+  return _.defaultsDeep(
+    _.pick(pathData, pathSpecificOptions),
+    {
+      tokenHandler: [].concat(routeOptions.tokenHandler, pathData.tokenHandler),
+      tokenHandlers: [].concat(routeOptions.tokenHandlers, pathData.tokenHandlers)
+    },
+    pathOptions,
     routeOptions
   );
 };
 
-const resolveContent = (content, xrequire) => {
-  if (!_.isString(content) && !_.isFunction(content) && content.module) {
-    const module = content.module.startsWith(".")
-      ? Path.join(process.cwd(), content.module)
-      : content.module;
-    xrequire = xrequire || require;
-    return xrequire(module);
+//
+// The route path can supply:
+//
+// - a literal string
+// - a function
+// - an object
+//
+// If it's an object:
+//   -- if it doesn't contain content, then it's assume to be the content.
+//
+// If it contains content, then it can contain:
+//
+// - method: HTTP method for the route
+// - config: route config (applicable for framework like Hapi)
+// - content: second level field to define content
+//
+// content can be:
+//
+// - a literal string
+// - a function
+// - an object
+//
+// If content is an object, it can contain module, a path to the JS module to require
+// to load the content.
+//
+const resolveContent = (pathData, xrequire) => {
+  const resolveTime = Date.now();
+
+  let content = pathData;
+
+  // If it's an object, see if contains content field
+  if (_.isObject(pathData) && pathData.hasOwnProperty("content")) {
+    content = pathData.content;
   }
 
-  return content;
+  if (!content && !_.isString(content)) return null;
+
+  // content has module field, require it.
+  if (!_.isString(content) && !_.isFunction(content) && content.module) {
+    const mod = content.module.startsWith(".") ? Path.resolve(content.module) : content.module;
+
+    xrequire = xrequire || require;
+
+    try {
+      return {
+        fullPath: xrequire.resolve(mod),
+        xrequire,
+        resolveTime,
+        content: xrequire(mod)
+      };
+    } catch (error) {
+      const msg = `electrode-react-webapp: load SSR content ${mod} failed - ${error.message}`;
+      console.error(msg, "\n", error); // eslint-disable-line
+      return {
+        fullPath: null,
+        error,
+        resolveTime,
+        content: msg
+      };
+    }
+  }
+
+  return {
+    fullPath: null,
+    resolveTime,
+    content
+  };
+};
+
+const getContentResolver = (registerOptions, pathData, path) => {
+  let resolved;
+
+  const resolveWithDev = (webpackDev, xrequire) => {
+    if (!webpackDev.valid) {
+      resolved = resolveContent("<!-- Webpack still compiling -->");
+    } else if (webpackDev.hasErrors) {
+      resolved = resolveContent("<!-- Webpack compile has errors -->");
+    } else if (!resolved || resolved.resolveTime < webpackDev.compileTime) {
+      if (resolved && resolved.fullPath) {
+        delete resolved.xrequire.cache[resolved.fullPath];
+      }
+      resolved = resolveContent(pathData, xrequire);
+    }
+
+    return resolved.content;
+  };
+
+  return (webpackDev, xrequire) => {
+    if (webpackDev && registerOptions.serverSideRendering !== false) {
+      return resolveWithDev(webpackDev, xrequire);
+    }
+
+    if (resolved) return resolved.content;
+
+    if (registerOptions.serverSideRendering !== false) {
+      resolved = resolveContent(pathData);
+      assert(resolved, `You must define content for the webapp plugin path ${path}`);
+    } else {
+      resolved = {
+        content: {
+          status: 200,
+          html: "<!-- SSR disabled by options.serverSideRendring -->"
+        }
+      };
+    }
+
+    return resolved.content;
+  };
 };
 
 module.exports = {
   setupOptions,
   setupPathOptions,
   makeRouteHandler,
-  resolveContent
+  resolveContent,
+  getContentResolver
 };

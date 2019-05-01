@@ -1,15 +1,22 @@
 "use strict";
 
+/* eslint-disable object-shorthand, max-statements */
+
 const Fs = require("fs");
-const archetype = require("./config/archetype");
+const Path = require("path");
 const assert = require("assert");
 const requireAt = require("require-at");
+const archetype = require("./config/archetype");
 
-assert(!archetype.noDev, "dev archetype is missing - development & build tasks not possible");
+// make sure that -dev app archetype is also installed.
+// if it's not then this will fail with an error message that it's not found.
+require.resolve(`${archetype.devArchetypeName}/package.json`);
 
-const Path = require("path");
+const warnYarn = require("./lib/warn-yarn");
+
 const devRequire = archetype.devRequire;
 
+const scanDir = devRequire("filter-scan-dir");
 const chalk = devRequire("chalk");
 
 if (process.argv[1].indexOf("gulp") >= 0) {
@@ -20,6 +27,10 @@ if (process.argv[1].indexOf("gulp") >= 0) {
   console.log(`\nIf you haven't done so, please run ${icmd}\n`);
   process.exit(1);
 }
+
+const mergeIsomorphicAssets = require(`${archetype.devDir}/scripts/merge-isomorphic-assets.js`);
+const flattenMessagesL10n = require(`${archetype.devDir}/scripts/l10n/flatten-messages.js`);
+const mapIsomorphicCdn = require(`${archetype.devDir}/scripts/map-isomorphic-cdn.js`);
 
 const config = archetype.config;
 const mkdirp = devRequire("mkdirp");
@@ -32,6 +43,30 @@ const penthouse = archetype.devRequire("penthouse");
 const CleanCSS = archetype.devRequire("clean-css");
 
 const logger = require("./lib/logger");
+
+function quote(str) {
+  return str.startsWith(`"`) ? str : `"${str}"`;
+}
+
+function taskArgs(argv) {
+  return (argv && argv.length > 1 && argv.slice(1)) || [];
+}
+
+function webpackConfig(file) {
+  return Path.join(config.webpack, file);
+}
+
+function karmaConfig(file) {
+  return Path.join(config.karma, file);
+}
+
+function mochaConfig(file) {
+  return Path.join(config.mocha, file);
+}
+
+function eslintConfig(file) {
+  return Path.join(config.eslint, file);
+}
 
 function setupPath() {
   const nmBin = Path.join("node_modules", ".bin");
@@ -48,16 +83,27 @@ function setDevelopmentEnv() {
   process.env.NODE_ENV = "development";
 }
 
-function setWebpackHot() {
-  process.env.HMR = "true";
+function setKarmaCovEnv() {
+  process.env.ENABLE_KARMA_COV = "true";
 }
 
 function setStaticFilesEnv() {
   process.env.STATIC_FILES = "true";
 }
 
+const defaultListenPort = 3000;
+
+const portFromEnv = () => {
+  const x = parseInt(process.env.PORT, 10);
+  /* istanbul ignore next */
+  return x !== null && !isNaN(x) ? x : defaultListenPort;
+};
+
 function setWebpackDev() {
   process.env.WEBPACK_DEV = "true";
+  if (archetype.webpack.devMiddleware) {
+    process.env.WEBPACK_DEV_MIDDLEWARE = "true";
+  }
 }
 
 function setOptimizeStats() {
@@ -229,16 +275,26 @@ function startAppServer(options) {
  *
  */
 
-function makeTasks() {
+// quick tips name naming and invoking tasks:
+// - task name without . or - are primary tasks
+// - task name starts with . are hidden in help output
+// - when invoking tasks in [], starting name with ? means optional (ie: won't fail if task not found)
+
+function makeTasks(xclap) {
+  assert(xclap.concurrent, "xclap version must be 0.2.28+");
+  process.env.ENABLE_CSS_MODULE = "false";
+  process.env.ENABLE_KARMA_COV = "false";
+
   const checkFrontendCov = minimum => {
     if (typeof minimum === "string") {
       minimum += ".";
     } else {
       minimum = "";
     }
+    const configFile = quote(`${config.istanbul}/.istanbul.${minimum}yml`);
     return exec(
       `istanbul check-coverage "coverage/client/*/coverage.json"`,
-      `--config=${config.istanbul}/.istanbul.${minimum}yml`
+      `--config=${configFile}`
     );
   };
 
@@ -248,9 +304,9 @@ function makeTasks() {
     createGitIgnoreDir(Path.resolve(archetype.prodModulesDir), "Electrode production modules dir");
     const prodPath = Path.join(archetype.prodModulesDir, module);
     const cmd = mkCmd(
-      `babel -q ${modulePath} --no-babelrc --ignore dist -D`,
+      `babel -q ${quote(modulePath)} --no-babelrc --ignore dist -D`,
       `--plugins transform-node-env-inline,minify-dead-code-elimination`,
-      `-d ${prodPath}`
+      `-d ${quote(prodPath)}`
     );
     return exec(cmd).then(() => {
       const dist = Path.join(modulePath, "dist");
@@ -262,21 +318,49 @@ function makeTasks() {
 
   const makeBabelRc = (destDir, rcFile) => {
     destDir = Path.resolve(destDir);
-    const fn = Path.join(destDir, ".babelrc");
-    if (Fs.existsSync(destDir) && !Fs.existsSync(fn)) {
+
+    if (!Fs.existsSync(destDir)) return;
+
+    const archRc = Path.join(archetype.devPkg.name, "config", "babel", rcFile);
+
+    const oldFn = Path.join(destDir, ".babelrc");
+    const fn = Path.join(destDir, ".babelrc.js");
+
+    if (Fs.existsSync(oldFn)) {
+      const rc = JSON.parse(Fs.readFileSync(oldFn));
+      rc.extends = archRc;
+      Fs.writeFileSync(oldFn, `${JSON.stringify(rc, null, 2)}\n`);
+      logger.info(`You have old ${oldFn} - please remove it to allow .babelrc.js.`);
+    } else if (!Fs.existsSync(fn)) {
       logger.info(`Generating ${fn} for you - please commit it.`);
-      const rc = JSON.stringify(
-        {
-          extends: `${Path.join(archetype.devPkg.name, "config", "babel", rcFile)}`
-        },
-        null,
-        2
-      );
-      Fs.writeFileSync(fn, `${rc}\n`);
+      const rc = `module.exports = {
+  extends: "${archRc}"
+};\n`;
+      Fs.writeFileSync(fn, rc);
     }
   };
 
   const AppMode = archetype.AppMode;
+
+  const babelCliIgnore = quote(
+    [`**/__test__`, `**/__tests__`, `**/_test_`, `**/*.spec.js`, `**/*.spec.jsx`]
+      .concat(archetype.babel.enableTypeScript && [`**/*.test.ts`, `**/*.test.tsx`])
+      .filter(x => x)
+      .join(",")
+  );
+
+  const babelCliExtensions = quote(
+    [".js", ".jsx"]
+      .concat(archetype.babel.enableTypeScript && [".ts", ".tsx"])
+      .filter(x => x)
+      .join(",")
+  );
+
+  const babelEnvTargetsArr = Object.keys(archetype.babel.envTargets).filter(k => k !== "node");
+
+  const buildDistDirs = babelEnvTargetsArr
+    .filter(name => name !== "default")
+    .map(name => `dist-${name}`);
 
   let tasks = {
     ".mk-prod-dir": () =>
@@ -285,17 +369,16 @@ function makeTasks() {
     ".mk-dll-dir": () => createGitIgnoreDir(Path.resolve("dll"), "Electrode dll dir"),
     ".production-env": () => setProductionEnv(),
     ".development-env": () => setDevelopmentEnv(),
-    ".webpack-hot": () => setWebpackHot(),
     ".webpack-dev": () => setWebpackDev(),
     ".static-files-env": () => setStaticFilesEnv(),
     ".optimize-stats": () => setOptimizeStats(),
     ".remove-log-files": () => removeLogFiles(),
     build: {
-      dep: [".remove-log-files"],
+      dep: [".remove-log-files", ".production-env", ".set.css-module.env"],
       desc: AppMode.isSrc
         ? `Build your app's ${AppMode.src.dir} directory into ${AppMode.lib.dir} for production`
         : "Build your app's client bundle",
-      task: ["build-dist", ".build-lib", ".check.top.level.babelrc"]
+      task: [".build-lib", "build-dist", ".check.top.level.babelrc", "mv-to-dist"]
     },
 
     //
@@ -305,9 +388,16 @@ function makeTasks() {
       setProductionEnv();
       return exec(
         `webpack`,
-        `--config ${config.webpack}/webpack.config.browsercoverage.js`,
+        `--config`,
+        quote(webpackConfig("webpack.config.browsercoverage.js")),
         `--colors`
       );
+    },
+    ".set.css-module.env": () => {
+      const x = archetype.webpack;
+      if (x.cssModuleSupport && x.enableShortenCSSNames) {
+        process.env.ENABLE_CSS_MODULE = "true";
+      }
     },
     "build-browser-coverage": {
       desc: "Build browser coverage",
@@ -325,6 +415,8 @@ function makeTasks() {
     },
 
     "build-dist": [
+      ".production-env",
+      ".set.css-module.env",
       ".clean.build",
       "build-dist-dll",
       "build-dist-min",
@@ -334,9 +426,15 @@ function makeTasks() {
       "build-dist:clean-tmp"
     ],
 
+    "mv-to-dist": ["mv-to-dist:clean", "mv-to-dist:mv-dirs", "mv-to-dist:keep-targets"],
     "build-dist-dev-static": {
       desc: false,
-      task: `webpack --config ${config.webpack}/webpack.config.dev.static.js --colors`
+      task: mkCmd(
+        `webpack --config`,
+        quote(webpackConfig("webpack.config.dev.static.js")),
+        `--colors`,
+        `--display-error-details`
+      )
     },
 
     ".ss-prod-react": () => optimizeModuleForProd("react"),
@@ -349,9 +447,11 @@ function makeTasks() {
       );
     },
     "ss-prod-react": {
-      desc: `Make optimized copy of react&react-dom for server side in dir ${archetype.prodModulesDir}`,
+      desc: `Make optimized copy of react&react-dom for server side in dir ${
+        archetype.prodModulesDir
+      }`,
       dep: [".ss-clean.prod-react", ".mk-prod-dir"],
-      task: [[".ss-prod-react", ".ss-prod-react-dom"]]
+      task: xclap.concurrent(".ss-prod-react", ".ss-prod-react-dom")
     },
 
     "build-dist-dll": () => undefined,
@@ -359,8 +459,86 @@ function makeTasks() {
 
     "build-dist-min": {
       dep: [".production-env"],
-      desc: false,
-      task: `webpack --config ${config.webpack}/webpack.config.js --colors`
+      desc: "build dist for production",
+      task: xclap.concurrent(
+        babelEnvTargetsArr.map((name, index) =>
+          xclap.exec(
+            [
+              `webpack --config`,
+              quote(webpackConfig("webpack.config.js")),
+              `--colors --display-error-details`
+            ],
+            {
+              xclap: { delayRunMs: index * 2000 },
+              execOptions: { env: { ENV_TARGET: name } }
+            }
+          )
+        )
+      )
+    },
+
+    "mv-to-dist:clean": {
+      desc: `clean static resources within ${buildDistDirs}`,
+      task: () => {
+        buildDistDirs.forEach(dir => {
+          // clean static resources within `dist-X` built by user specified env targets
+          // and leave [.js, .map, .json] files only
+          const removedFiles = scanDir.sync({
+            dir: Path.resolve(dir),
+            includeRoot: true,
+            ignoreExt: [".js", ".map", ".json"]
+          });
+          shell.rm("-rf", ...removedFiles);
+        });
+        return;
+      }
+    },
+
+    "mv-to-dist:mv-dirs": {
+      desc: `move ${buildDistDirs} to dist`,
+      task: () => {
+        buildDistDirs.forEach(dir => {
+          scanDir
+            .sync({
+              dir,
+              includeRoot: true,
+              filterExt: [".js", ".json", ".map"]
+              // the regex above matches all the sw-registration.js, sw-registration.js.map,
+              // main.bundle.js and main.bundle.js.map and stats.json
+            })
+            .forEach(file => {
+              if (file.endsWith(".js")) {
+                shell.cp("-r", file, "dist/js");
+              } else if (file.endsWith(".map")) {
+                shell.cp("-r", file, "dist/map");
+              } else {
+                shell.cp("-r", file, `dist/server/${dir.split("-")[1]}-${Path.basename(file)}`);
+              }
+            });
+        });
+        return;
+      }
+    },
+
+    "mv-to-dist:keep-targets": {
+      desc: `write each targets to respective isomorphic-assets.json`,
+      task: () => {
+        buildDistDirs.forEach(dir => {
+          const isomorphicPath = Path.resolve(dir, "isomorphic-assets.json"); // add `targets` field to `dist-X/isomorphic-assets.json`
+          if (Fs.existsSync(isomorphicPath)) {
+            Fs.readFile(isomorphicPath, { encoding: "utf8" }, (err, data) => {
+              if (err) throw err;
+              const assetsJson = JSON.parse(data);
+              const { envTargets } = archetype.babel;
+              assetsJson.targets = envTargets[dir.split("-")[1]];
+              Fs.writeFile(isomorphicPath, JSON.stringify(assetsJson, null, 2), err => {
+                if (err) throw err;
+              });
+            });
+          }
+        });
+        return;
+      }
     },
 
     "build-dist:clean-tmp": {
@@ -368,16 +546,9 @@ function makeTasks() {
       task: () => shell.rm("-rf", "./tmp")
     },
 
-    "build-dist:flatten-l10n": {
-      desc: false,
-      task: `node ${archetype.devDir}/scripts/l10n/flatten-messages.js`
-    },
+    "build-dist:flatten-l10n": flattenMessagesL10n,
 
-    "build-dist:merge-isomorphic-assets": {
-      desc: false,
-      task: `node ${archetype.devDir}/scripts/merge-isomorphic-assets.js`
-    },
-
+    "build-dist:merge-isomorphic-assets": mergeIsomorphicAssets,
     ".build-lib": () => undefined,
 
     ".check.top.level.babelrc": () => {
@@ -398,16 +569,76 @@ Individual .babelrc files were generated for you in src/client and src/server
       );
     },
 
-    ".build.client.babelrc": () => makeBabelRc(AppMode.src.client, "babelrc-client"),
+    ".build.client.babelrc": () => {
+      makeBabelRc(AppMode.src.dir, "babelrc-client.js");
+      makeBabelRc(AppMode.src.client, "babelrc-client.js");
+    },
 
+    ".build-lib:delete-babel-ignored-files": {
+      desc: false,
+      task: () => {
+        const libDir = Path.resolve(AppMode.lib.dir);
+        const ignoredFiles = scanDir.sync({
+          dir: libDir,
+          includeRoot: true,
+          filter: x => {
+            return x.indexOf(".spec.") > 0 || x.indexOf(".test.") > 0;
+          }
+        });
+        ignoredFiles.forEach(f => Fs.unlinkSync(f));
+      }
+    },
+
+    "build-lib:all": {
+      desc: false,
+      dep: [
+        ".clean.lib:client",
+        ".clean.lib:server",
+        ".mk.lib.client.dir",
+        ".mk.lib.server.dir",
+        ".build.client.babelrc",
+        ".build.server.babelrc"
+      ],
+      task: mkCmd(
+        `~$babel ${AppMode.src.dir}`,
+        `--out-dir=${AppMode.lib.dir}`,
+        `--extensions=${babelCliExtensions}`,
+        `--source-maps=inline --copy-files`,
+        `--verbose --ignore=${babelCliIgnore}`
+      ),
+      finally: [".build-lib:delete-babel-ignored-files"]
+    },
+
+    // TODO: to be removed
     "build-lib:client": {
       desc: false,
       dep: [".clean.lib:client", ".mk.lib.client.dir", ".build.client.babelrc"],
-      task: mkCmd(
-        `babel`,
-        `--source-maps=inline --copy-files --out-dir ${AppMode.lib.client}`,
-        `${AppMode.src.client}`
-      )
+      task: () => {
+        const dirs = AppMode.hasSubApps
+          ? []
+              .concat(
+                scanDir.sync({
+                  dir: AppMode.src.dir,
+                  includeDir: true,
+                  grouping: true,
+                  filterDir: x => !x.startsWith("server") && "dirs",
+                  filter: () => false
+                }).dirs
+              )
+              .filter(x => x)
+          : [AppMode.client];
+
+        return dirs.map(x =>
+          mkCmd(
+            `~$babel ${Path.posix.join(AppMode.src.dir, x)}`,
+            `--out-dir=${Path.posix.join(AppMode.lib.dir, x)}`,
+            `--extensions=${babelCliExtensions}`,
+            `--source-maps=inline --copy-files`,
+            `--verbose --ignore=${babelCliIgnore}`
+          )
+        );
+      },
+      finally: [".build-lib:delete-babel-ignored-files"]
     },
 
     ".clean.lib:server": () => shell.rm("-rf", AppMode.lib.server),
@@ -418,24 +649,43 @@ Individual .babelrc files were generated for you in src/client and src/server
       );
     },
 
-    ".build.server.babelrc": () => makeBabelRc(AppMode.src.server, "babelrc-server"),
+    ".build.server.babelrc": () => {
+      const serverDirs =
+        scanDir.sync({
+          dir: AppMode.src.dir,
+          includeDir: true,
+          includeRoot: true,
+          grouping: true,
+          filterDir: x => x.startsWith("server") && "dirs",
+          filter: () => false
+        }).dirs || [];
 
+      serverDirs.forEach(x => {
+        makeBabelRc(x, "babelrc-server.js");
+      });
+    },
+
+    // TODO: to be removed
     "build-lib:server": {
       desc: false,
       dep: [".clean.lib:server", ".mk.lib.server.dir", ".build.server.babelrc"],
-      task: mkCmd(
-        `babel`,
-        `--source-maps=inline --copy-files --out-dir ${AppMode.lib.server}`,
-        `${AppMode.src.server}`
-      )
+      task: [
+        mkCmd(
+          `~$babel ${AppMode.src.server} --out-dir=${AppMode.lib.server}`,
+          `--extensions=${babelCliExtensions}`,
+          `--source-maps=inline --copy-files`,
+          `--ignore=${babelCliIgnore}`
+        ),
+        ".build-lib:delete-babel-ignored-files"
+      ]
     },
 
     ".build.test.client.babelrc": () => {
-      return AppMode.isSrc && makeBabelRc("test/client", "babelrc-client");
+      return AppMode.isSrc && makeBabelRc("test/client", "babelrc-client.js");
     },
 
     ".build.test.server.babelrc": () => {
-      return AppMode.isSrc && makeBabelRc("test/server", "babelrc-server");
+      return AppMode.isSrc && makeBabelRc("test/server", "babelrc-server.js");
     },
 
     check: ["lint", "test-cov"],
@@ -444,7 +694,7 @@ Individual .babelrc files were generated for you in src/client and src/server
     "check-dev": ["lint", "test-dev"],
 
     clean: [".clean.dist", ".clean.lib", ".clean.prod", ".clean.etmp", ".clean.dll"],
-    ".clean.dist": () => shell.rm("-rf", "dist"),
+    ".clean.dist": () => shell.rm("-rf", "dist", ...buildDistDirs),
     ".clean.lib": () => undefined, // to be updated below for src mode
     ".clean.prod": () => shell.rm("-rf", archetype.prodDir),
     ".clean.etmp": () => shell.rm("-rf", eTmpDir),
@@ -458,10 +708,38 @@ Individual .babelrc files were generated for you in src/client and src/server
     "cov-frontend-95": () => checkFrontendCov("95"),
 
     debug: ["build-dev-static", "server-debug"],
+    devbrk: ["dev --inspect-brk"],
     dev: {
-      desc: "Start your app with watch in development mode with webpack-dev-server",
-      dep: [".remove-log-files", ".development-env", ".clean.build", ".mk-dist-dir"],
-      task: [".webpack-dev", ["wds.dev", "server-watch", "generate-service-worker"]]
+      desc: "Start your app with watch in development mode",
+      dep: [
+        ".remove-log-files",
+        ".development-env",
+        ".mk-dist-dir",
+        ".build.client.babelrc",
+        ".build.server.babelrc"
+      ],
+      task: function() {
+        if (!Fs.existsSync(".isomorphic-loader-config.json")) {
+          Fs.writeFileSync(".isomorphic-loader-config.json", JSON.stringify({}));
+        }
+        const args = taskArgs(this.argv);
+
+        return [
+          ".set.css-module.env",
+          ".webpack-dev",
+          archetype.webpack.devMiddleware
+            ? ["server-admin", "generate-service-worker"]
+            : ["wds.dev", `server-watch ${args.join(" ")}`, "generate-service-worker"]
+        ];
+      }
+    },
+
+    hot: {
+      desc: "Start app dev with hot reload enabled",
+      task: () => {
+        archetype.webpack.enableHotModuleReload = true;
+        return "dev";
+      }
     },
 
     "dev-static": {
@@ -469,19 +747,13 @@ Individual .babelrc files were generated for you in src/client and src/server
       task: ["build-dev-static", "app-server"]
     },
 
-    hot: {
-      desc: "Start your app with watch in hot mode with webpack-dev-server",
-      dep: [".development-env", ".webpack-hot"],
-      task: [".webpack-dev", ["wds.hot", "server-watch", "generate-service-worker"]]
-    },
-
-    lint: [["lint-client", "lint-client-test", "lint-server", "lint-server-test"]],
+    lint: xclap.concurrent("lint-client", "lint-client-test", "lint-server", "lint-server-test"),
     "lint-client": {
       desc: "Run eslint on client code in directories client and templates",
       task: () =>
         lint({
           ext: ".js,.jsx",
-          config: `${config.eslint}/.eslintrc-react`,
+          config: eslintConfig(".eslintrc-react"),
           targets: [AppMode.src.client, "templates"]
         })
     },
@@ -490,7 +762,7 @@ Individual .babelrc files were generated for you in src/client and src/server
       task: () =>
         lint({
           ext: ".js,.jsx",
-          config: `${config.eslint}/.eslintrc-react-test`,
+          config: eslintConfig(".eslintrc-react-test"),
           targets: ["test/client"]
         })
     },
@@ -498,7 +770,7 @@ Individual .babelrc files were generated for you in src/client and src/server
       desc: "Run eslint on server code in directory server",
       task: () =>
         lint({
-          config: `${config.eslint}/.eslintrc-node`,
+          config: eslintConfig(".eslintrc-node"),
           targets: [AppMode.src.server]
         })
     },
@@ -507,14 +779,14 @@ Individual .babelrc files were generated for you in src/client and src/server
       task: () =>
         lint({
           config: process.env.SERVER_ES6
-            ? `${config.eslint}/.eslintrc-mocha-test-es6`
-            : `${config.eslint}/.eslintrc-mocha-test`,
+            ? eslintConfig(".eslintrc-mocha-test-es6")
+            : eslintConfig(".eslintrc-mocha-test"),
           targets: ["test/server", "test/func"]
         })
     },
 
     "npm:test": ["check"],
-    "npm:release": `node ${archetype.devDir}/scripts/map-isomorphic-cdn.js`,
+    "npm:release": mapIsomorphicCdn,
 
     server: ["app-server"], // keep old server name for backward compat
 
@@ -561,18 +833,45 @@ Individual .babelrc files were generated for you in src/client and src/server
     "server-watch": {
       dep: [".init-bundle.valid.log"],
       desc: "Start app's node server in watch mode with nodemon",
-      task: () => {
-        const watches = [Path.join(eTmpDir, "bundle.valid.log"), AppMode.src.server, "config"]
+      task: function() {
+        const watches = (archetype.webpack.devMiddleware
+          ? []
+          : [Path.join(eTmpDir, "bundle.valid.log")]
+        )
+          .concat(["config", AppMode.src.server])
+          .filter(x => x)
           .map(n => `--watch ${n}`)
           .join(" ");
         AppMode.setEnv(AppMode.src.dir);
+        const babelRun = quote(Path.join(archetype.dir, "support/babel-run"));
         const nodeRunApp = AppMode.isSrc
-          ? `node ${archetype.dir}/support/babel-run ${AppMode.src.server}`
+          ? `node ${babelRun} ${AppMode.src.server}`
           : `node ${AppMode.src.server}`;
-        return exec(
-          `nodemon`,
-          `--delay 1 -C --ext js,jsx,json,yaml ${watches}`,
+
+        return mkCmd(
+          `~$nodemon`,
+          taskArgs(this.argv).join(" "),
+          archetype.webpack.devMiddleware ? "" : "-C",
+          `--delay 1 --ext js,jsx,json,yaml,log,ts,tsx ${watches}`,
           `--exec ${nodeRunApp}`
+        );
+      }
+    },
+
+    "server-admin": {
+      desc: "Start development with admin server",
+      task: function() {
+        AppMode.setEnv(AppMode.src.dir);
+        const exec = AppMode.isSrc
+          ? quote(Path.join(archetype.dir, "support/babel-run"))
+          : AppMode.src.server;
+
+        return mkCmd(
+          `~(tty)$node ${quote(Path.join(archetype.devDir, "lib/dev-admin"))}`,
+          taskArgs(this.argv).join(" "),
+          `--exec ${exec} --ext js,jsx,json,yaml,log,ts,tsx`,
+          `--watch config ${AppMode.src.server}`,
+          AppMode.isSrc ? `-- ${AppMode.src.server}` : ""
         );
       }
     },
@@ -581,19 +880,11 @@ Individual .babelrc files were generated for you in src/client and src/server
       desc: "Start webpack-dev-server in dev mode",
       task: mkCmd(
         "webpack-dev-server",
-        `--config ${config.webpack}/webpack.config.dev.js`,
+        `--watch --watch-aggregate-timeout 2000`,
+        archetype.webpack.enableHotModuleReload ? `--hot` : ``,
+        `--config`,
+        quote(webpackConfig("webpack.config.dev.js")),
         `--progress --colors`,
-        `--port ${archetype.webpack.devPort}`,
-        `--host ${archetype.webpack.devHostname}`
-      )
-    },
-
-    "wds.hot": {
-      desc: "Start webpack-dev-server with Hot Module Reload",
-      task: mkCmd(
-        "webpack-dev-server",
-        `--config ${config.webpack}/webpack.config.hot.js`,
-        `--hot --progress --colors --inline`,
         `--port ${archetype.webpack.devPort}`,
         `--host ${archetype.webpack.devHostname}`
       )
@@ -603,23 +894,25 @@ Individual .babelrc files were generated for you in src/client and src/server
       desc: "Start webpack-dev-server in test mode",
       task: mkCmd(
         "webpack-dev-server",
-        `--config ${config.webpack}/webpack.config.test.js`,
+        `--config`,
+        quote(webpackConfig("webpack.config.test.js")),
         `--progress --colors`,
         `--port ${archetype.webpack.testPort}`,
         `--host ${archetype.webpack.devHostname}`
       )
     },
 
-    "test-server": () => [["lint-server", "lint-server-test"], "test-server-cov"],
-    "test-watch-all": [["wds.test", "test-frontend-dev-watch"]],
+    "test-server": xclap.concurrent(["lint-server", "lint-server-test"], "test-server-cov"),
+    "test-watch-all": xclap.concurrent("wds.test", "test-frontend-dev-watch"),
 
     "test-ci": ["test-frontend-ci"],
     "test-cov": [
       ".build.test.client.babelrc",
       ".build.test.server.babelrc",
-      "test-frontend-cov",
+      "?.karma.test-frontend-cov",
+      ".jest.test-frontend-cov",
       "test-server-cov"
-    ],
+    ].filter(x => x),
     "test-dev": ["test-frontend-dev", "test-server-dev"],
 
     "test-watch": () =>
@@ -627,29 +920,47 @@ Individual .babelrc files were generated for you in src/client and src/server
         .then(() => `test-frontend-dev-watch`)
         .catch(() => `test-watch-all`),
 
-    "test-frontend": mkCmd(`karma`, `start ${config.karma}/karma.conf.js --colors`),
+    "test-frontend": ["?.karma.test-frontend"],
+    "test-frontend-ci": ["?.karma.test-frontend-ci"],
 
-    "test-frontend-ci": mkCmd(`karma`, `start ${config.karma}/karma.conf.coverage.js`, `--colors`),
+    ".jest.test-frontend-cov": () => {
+      const testDir = ["_test_", "__test__", "__tests__"].find(x => shell.test("-d", x));
+      let runJest = testDir;
+      if (!runJest) {
+        runJest =
+          scanDir.sync({
+            dir: Path.resolve(AppMode.src.dir),
+            filterExt: [".js", ".jsx", ".ts", ".tsx"],
+            filter: x => x.indexOf(".spec.") > 0 || x.indexOf(".test.") > 0
+          }).length > 0;
+      }
 
-    "test-frontend-cov": mkCmd(`karma`, `start ${config.karma}/karma.conf.coverage.js`, `--colors`),
+      if (!runJest) {
+        const { roots } = archetype.jest;
+        runJest = roots && roots.length > 0;
+      }
 
-    "test-frontend-dev": () =>
-      exec(`pgrep -fl "webpack-dev-server.*${archetype.webpack.testPort}"`)
-        .then(() => exec(`karma start ${config.karma}/karma.conf.dev.js --colors`))
-        .catch(() => `test-frontend`),
+      if (runJest) {
+        makeBabelRc(Path.join(testDir, "client"), "babelrc-client.js");
+        logger.info("Running jest unit tests");
+        return mkCmd(`~$jest`, `--config ${archetype.config.jest}/jest.config.js`);
+      } else {
+        return undefined;
+      }
+    },
+    "test-frontend-dev": ["?.karma.test-frontend-dev"],
 
-    "test-frontend-dev-watch": mkCmd(
-      `karma start`,
-      `${config.karma}/karma.conf.watch.js`,
-      `--colors --browsers Chrome --no-single-run --auto-watch`
-    ),
+    "test-frontend-dev-watch": ["?.karma.test-frontend-dev-watch"],
 
     "test-server-cov": () => {
       if (shell.test("-d", "test/server")) {
         AppMode.setEnv(AppMode.src.dir);
-        return exec(
-          `istanbul cover --include-all-sources --root src/server --report text --report lcov node_modules/mocha/bin/_mocha`,
-          `-- -c --opts ${config.mocha}/mocha.opts test/server`
+        return mkCmd(
+          `~$istanbul cover --include-all-sources --root src/server`,
+          `--report text --report lcov node_modules/mocha/bin/_mocha`,
+          `-- -c --opts`,
+          quote(mochaConfig("mocha.opts")),
+          `test/server`
         );
       }
       return undefined;
@@ -658,7 +969,7 @@ Individual .babelrc files were generated for you in src/client and src/server
     "test-server-dev": () => {
       if (shell.test("-d", "test/server")) {
         AppMode.setEnv(AppMode.src.dir);
-        return exec(`mocha`, `-c --opts ${config.mocha}/mocha.opts test/server`);
+        return mkCmd(`~$mocha -c --opts`, quote(mochaConfig("mocha.opts")), `test/server`);
       }
       return undefined;
     },
@@ -668,21 +979,6 @@ Individual .babelrc files were generated for you in src/client and src/server
       desc: "Build your app's client bundle for production and run bundle analyzer",
       task: ["build-dist", "optimize-stats"]
     },
-    "run-electrify-cli": {
-      desc: false,
-      task: `electrify dist/server/stats.json -O`
-    },
-    electrify: [
-      ".clean.dist",
-      "build-webpack-stats-with-fullpath",
-      "build-dist:clean-tmp",
-      "run-electrify-cli"
-    ],
-    "build-fp-stats": {
-      desc:
-        "Build static bundle with stats.json containing fullPaths to inspect the bundle on electrode-electrify",
-      task: `webpack --config ${config.webpack}/webpack.config.stats.electrify.js --colors`
-    },
     "critical-css": {
       desc: "Start server and run penthouse to output critical CSS",
       task: inlineCriticalCSS
@@ -690,16 +986,43 @@ Individual .babelrc files were generated for you in src/client and src/server
     "generate-service-worker": {
       desc:
         "Generate Service Worker using the options provided in the app/config/sw-precache-config.json " +
-        "file for prod/dev/hot mode",
+        "file for prod/dev mode",
       task: () => generateServiceWorker()
     },
     "optimize-stats": {
       desc: "Generate a list of all files that went into production bundle JS (results in .etmp)",
-      task: `analyze-bundle -b dist/js/bundle.*.js -s dist/server/stats.json`
+      task: () => {
+        const stats = JSON.parse(Fs.readFileSync("dist/server/stats.json"));
+
+        for (const chunk in stats.assetsByChunkName) {
+          if (!chunk.includes("styles")) {
+            const bundle = stats.assetsByChunkName[chunk].find(
+              x => x.endsWith(".js") && x.includes("bundle")
+            );
+            if (bundle) {
+              if (!Fs.existsSync(`.etmp.${chunk}`)) {
+                Fs.mkdirSync(`.etmp.${chunk}`);
+              }
+              exec(
+                `analyze-bundle -b dist/js/${bundle} -s dist/server/stats.json --d .etmp.${chunk}`
+              );
+            }
+          }
+        }
+        return;
+      }
     },
     pwa: {
       desc: "PWA must have dist by running `clap build` first and then start the app server only.",
       task: ["build", "server"]
+    },
+    initflow: {
+      desc: "Initiate Flow for type checker",
+      task: mkCmd(`flow init`)
+    },
+    "flow-typed-install": {
+      desc: "Install flow 3rd-party interface library definitions from flow-typed repo.",
+      task: mkCmd(`flow-typed install --packageDir ${archetype.devDir}`)
     }
   };
 
@@ -712,19 +1035,60 @@ Individual .babelrc files were generated for you in src/client and src/server
       ".build-lib": {
         desc: false,
         dep: [".clean.lib", ".mk-prod-dir"],
-        task: ["build-lib:client", "build-lib:server", ".build-lib:app-mode"]
+        task: ["build-lib:all", ".build-lib:app-mode"]
       }
     });
   }
 
   if (Fs.existsSync(Path.resolve(AppMode.src.client, "dll.config.js"))) {
-    tasks = Object.assign(tasks, {
+    Object.assign(tasks, {
       "build-dist-dll": {
         dep: [".mk-dll-dir", ".mk-dist-dir", ".production-env"],
-        task: () => exec(`webpack`, `--config ${config.webpack}/webpack.config.dll.js`, `--colors`)
+        task: () =>
+          exec(
+            `webpack --config`,
+            quote(webpackConfig("webpack.config.dll.js")),
+            `--colors`,
+            `--display-error-details`
+          )
       },
       "copy-dll": () => shell.cp("-r", "dll/*", "dist")
     });
+  }
+
+  if (archetype.options.karma !== false) {
+    Object.assign(tasks, {
+      ".karma.test-frontend": mkCmd(`karma start`, quote(karmaConfig("karma.conf.js")), `--colors`),
+
+      ".karma.test-frontend-ci": {
+        dep: [setKarmaCovEnv],
+        task: mkCmd(`karma start`, quote(karmaConfig("karma.conf.coverage.js")), `--colors`)
+      },
+
+      ".karma.test-frontend-cov": {
+        dep: [setKarmaCovEnv],
+        task: () => {
+          if (shell.test("-d", "test")) {
+            logger.info("\nRunning Karma unit tests:\n");
+            return mkCmd(`~$karma start`, quote(karmaConfig("karma.conf.coverage.js")), `--colors`);
+          }
+          return undefined;
+        }
+      },
+
+      ".karma.test-frontend-dev": () =>
+        exec(`pgrep -fl "webpack-dev-server.*${archetype.webpack.testPort}"`)
+          .then(() => exec(`karma start`, quote(karmaConfig("karma.conf.dev.js")), `--colors`))
+          .catch(() => `test-frontend`),
+
+      ".karma.test-frontend-dev-watch": mkCmd(
+        `karma start`,
+        quote(karmaConfig("karma.conf.watch.js")),
+        `--colors --browsers Chrome --no-single-run --auto-watch`
+      )
+    });
+  } else {
+    logger.info("Disabling karma test tasks since archetype config options.karma === false");
   }
 
   return tasks;
@@ -735,5 +1099,6 @@ module.exports = function(xclap) {
   createElectrodeTmpDir();
   xclap = xclap || requireAt(process.cwd())("xclap") || devRequire("xclap");
   process.env.FORCE_COLOR = "true"; // force color for chalk
-  xclap.load("electrode", makeTasks());
+  xclap.load("electrode", makeTasks(xclap));
+  warnYarn();
 };

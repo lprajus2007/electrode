@@ -1,11 +1,11 @@
 /*
  * Looks at each commit that is not a "Merge pull request", figure out
  * the packages it modified and group the commit messages by package.
- * 
+ *
  * Then check for [major], [minor], [patch] in the commit message, and
- * automatically generate the new package tag name with the would be 
+ * automatically generate the new package tag name with the would be
  * updated version.
- * 
+ *
  * Write all these to the file CHANGELOG.md.
  *
  */
@@ -27,7 +27,9 @@ const packageMapping = {
   "electrode-archetype-react-app": "electrode-archetype-react-app[-dev]",
   "electrode-archetype-react-app-dev": "electrode-archetype-react-app[-dev]",
   "electrode-archetype-react-component": "electrode-archetype-react-component[-dev]",
-  "electrode-archetype-react-component-dev": "electrode-archetype-react-component[-dev]"
+  "electrode-archetype-react-component-dev": "electrode-archetype-react-component[-dev]",
+  "electrode-archetype-webpack-dll": "electrode-archetype-webpack-dll[-dev]",
+  "electrode-archetype-webpack-dll-dev": "electrode-archetype-webpack-dll[-dev]"
 };
 
 const reverseMapping = Object.assign.apply(
@@ -73,7 +75,7 @@ const processLernaUpdated = output => {
   const packages = output.stdout
     .split("\n")
     .filter(x => x.trim().length > 0)
-    .map(x => x.substr(2));
+    .map(x => x.substr(2).split(" ")[0]);
   return { tag, packages };
 };
 
@@ -150,15 +152,25 @@ const collateCommitsPackages = commits => {
     collated.lernaPackages = commits.updated.packages.filter(
       r => collated.realPackages.indexOf(r) < 0
     );
-    const updateByMap = _(collated.realPackages)
-      .map(p => packageMapping[p])
-      .filter()
-      .map(p => {
-        return reverseMapping[p] || undefined;
-      })
-      .flatMap()
-      .value();
-    collated.realPackages = _.uniq(collated.realPackages.concat(updateByMap));
+
+    const checkGroupMap = key => {
+      const updateByMap = _(collated[key])
+        .map(p => packageMapping[p])
+        .filter()
+        .map(p => {
+          return reverseMapping[p] || undefined;
+        })
+        .flatMap()
+        .filter(x => {
+          return collated.realPackages.indexOf(x) < 0 && collated.lernaPackages.indexOf(x) < 0;
+        })
+        .value();
+      collated[key] = _.uniq(collated[key].concat(updateByMap));
+    };
+
+    checkGroupMap("realPackages");
+    checkGroupMap("lernaPackages");
+
     collated.forcePackages = collated.realPackages.filter(
       r => commits.updated.packages.indexOf(r) < 0
     );
@@ -187,8 +199,14 @@ const determinePackageVersions = collated => {
       return a;
     }, 0);
     packages[mappedName].version = Pkg.version;
-    const newVersion = semver.inc(Pkg.version, types[updateType]);
-    packages[mappedName].newVersion = newVersion;
+    const x = semver.parse(Pkg.version);
+    packages[mappedName].versionOnly = `${x.major}.${x.minor}.${x.patch}`;
+    packages[mappedName].semver = x;
+    packages[mappedName].newVersion = semver.inc(
+      packages[mappedName].versionOnly,
+      types[updateType]
+    );
+    packages[mappedName].originalPkg = Pkg;
   };
 
   return Promise.map(collated.realPackages, name => findVersion(name, collated.packages))
@@ -202,6 +220,36 @@ const determinePackageVersions = collated => {
     .then(() => collated);
 };
 
+const lernaRc = require("../lerna.json");
+
+const getTaggedVersion = pkg => {
+  const newVer = pkg.newVersion;
+
+  const fynpoTags = _.get(lernaRc, "fynpo.publishConfig.tags");
+  if (fynpoTags) {
+    for (const tag in fynpoTags) {
+      if (!tag.match(/^[0-9A-Za-z-]+$/)) {
+        throw new Error(`tag ${tag} invalid. Only [0-9A-Za-z-] characters allowed.`);
+      }
+      const tagInfo = fynpoTags[tag];
+      if (tagInfo.enabled === false) continue;
+      const enabled = _.get(tagInfo, ["packages", pkg.originalPkg.name]);
+      if (enabled) {
+        if (tag !== "latest" && tagInfo.addToVersion) {
+          let tagNum = 1;
+          const semv = pkg.semver;
+          if (semv.prerelease[0] && semv.prerelease[0] === tag) {
+            return semv.inc("prerelease").format();
+          }
+          return `${pkg.versionOnly}-${tag}.0`;
+        }
+      }
+    }
+  }
+
+  return newVer;
+};
+
 const updateChangelog = collated => {
   const emittedCommits = {};
   const d = new Date();
@@ -213,9 +261,9 @@ const updateChangelog = collated => {
   }
   const emitPackageMsg = (p, packages) => {
     const pkg = packages[mapPkg(p)];
-    output.push(
-      `-   ${p}@${pkg.newVersion} ` + "`" + `(${pkg.version} => ${pkg.newVersion})` + "`\n"
-    );
+    const newVer = getTaggedVersion(pkg);
+    if (pkg.originalPkg.private) return;
+    output.push(`-   \`${p}@${newVer}\` ` + "`" + `(${pkg.version} => ${newVer})` + "`\n");
   };
   collated.realPackages.sort().forEach(p => emitPackageMsg(p, collated.packages));
   if (lernaUpdated) {
@@ -311,7 +359,7 @@ const commitChangeLogFile = clean => {
       console.log("Changelog committed");
     })
     .catch(e => {
-      console.log("Comit changelog failed", e);
+      console.log("Commit changelog failed", e);
     });
 };
 

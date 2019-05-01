@@ -5,6 +5,8 @@
 const _ = require("lodash");
 const fs = require("fs");
 const Path = require("path");
+const requireAt = require("require-at");
+const assert = require("assert");
 
 /**
  * Tries to import bundle chunk selector function if the corresponding option is set in the
@@ -76,7 +78,7 @@ function getIconStats(iconStatsPath) {
 }
 
 function getCriticalCSS(path) {
-  const criticalCSSPath = Path.resolve(process.cwd(), path);
+  const criticalCSSPath = Path.resolve(process.cwd(), path || "");
 
   try {
     const criticalCSS = fs.readFileSync(criticalCSSPath).toString();
@@ -101,10 +103,200 @@ function getStatsPath(statsFilePath, buildArtifactsPath) {
     : statsFilePath;
 }
 
+function htmlifyError(err, withStack) {
+  const html = err.html ? `<div>${err.html}</div>\n` : "";
+  const errMsg = () => {
+    if (withStack !== false && err.stack) {
+      if (process.env.NODE_ENV !== "production") {
+        const rgx = new RegExp(process.cwd(), "g");
+        return err.stack.replace(rgx, "CWD");
+      } else {
+        return `- Not sending Error stack for production\n\nMessage: ${err.message}`;
+      }
+    } else {
+      return err.message;
+    }
+  };
+  return `<html><head><title>OOPS</title></head><body>
+${html}
+<pre>
+${errMsg()}
+</pre></body></html>`;
+}
+
+function getDevCssBundle(chunkNames, routeData) {
+  const devBundleBase = routeData.devBundleBase;
+  if (chunkNames.css) {
+    const cssChunks = Array.isArray(chunkNames.css) ? chunkNames.css : [chunkNames.css];
+    return _.map(cssChunks, chunkName => `${devBundleBase}${chunkName}.style.css`);
+  } else {
+    return [`${devBundleBase}style.css`];
+  }
+}
+
+function getDevJsBundle(chunkNames, routeData) {
+  const devBundleBase = routeData.devBundleBase;
+
+  return chunkNames.js
+    ? `${devBundleBase}${chunkNames.js}.bundle.dev.js`
+    : `${devBundleBase}bundle.dev.js`;
+}
+
+function getProdBundles(chunkNames, routeData) {
+  const assets = routeData.assets;
+
+  return {
+    jsChunk: _.find(assets.js, asset => _.includes(asset.chunkNames, chunkNames.js)),
+
+    cssChunk: _.filter(assets.css, asset =>
+      _.some(asset.chunkNames, assetChunkName => _.includes(chunkNames.css, assetChunkName))
+    )
+  };
+}
+
+function processRenderSsMode(request, renderSs, mode) {
+  if (renderSs) {
+    if (mode === "noss") {
+      return false;
+    } else if (renderSs === "datass" || mode === "datass") {
+      renderSs = "datass";
+      // signal user content callback to populate prefetch data only and skips actual SSR
+      _.set(request, ["app", "ssrPrefetchOnly"], true);
+    }
+  }
+
+  return renderSs;
+}
+
+function getCspNonce(request, cspNonceValue) {
+  let scriptNonce = "";
+  let styleNonce = "";
+
+  if (cspNonceValue) {
+    if (typeof cspNonceValue === "function") {
+      scriptNonce = cspNonceValue(request, "script");
+      styleNonce = cspNonceValue(request, "style");
+    } else {
+      scriptNonce = _.get(request, cspNonceValue.script);
+      styleNonce = _.get(request, cspNonceValue.style);
+    }
+    scriptNonce = scriptNonce ? ` nonce="${scriptNonce}"` : "";
+    styleNonce = styleNonce ? ` nonce="${styleNonce}"` : "";
+  }
+
+  return { scriptNonce, styleNonce };
+}
+
+const resolvePath = path => (!Path.isAbsolute(path) ? Path.resolve(path) : path);
+
+function responseForError(request, routeOptions, err) {
+  return {
+    status: err.status || 500,
+    html: htmlifyError(err, routeOptions.replyErrorStack)
+  };
+}
+
+function responseForBadStatus(request, routeOptions, data) {
+  return {
+    status: data.status,
+    html: (data && data.html) || data
+  };
+}
+
+function loadFuncFromModule(modulePath, exportFuncName, requireAtDir) {
+  const mod = requireAt(requireAtDir || process.cwd())(modulePath);
+  const exportFunc = (exportFuncName && mod[exportFuncName]) || mod;
+  assert(
+    typeof exportFunc === "function",
+    `loadFuncFromModule ${modulePath} doesn't export a usable function`
+  );
+  return exportFunc;
+}
+
+function invokeTemplateProcessor(asyncTemplate, routeOptions) {
+  const tp = routeOptions.templateProcessor;
+
+  if (tp) {
+    let tpFunc;
+    if (typeof tp === "string") {
+      tpFunc = loadFuncFromModule(tp, "templateProcessor");
+    } else {
+      tpFunc = tp;
+      assert(typeof tpFunc === "function", `templateProcessor is not a function`);
+    }
+
+    return tpFunc(asyncTemplate, routeOptions);
+  }
+
+  return undefined;
+}
+
+function getOtherStats() {
+  const otherStats = {};
+  if (fs.existsSync("dist/server")) {
+    fs.readdirSync("dist/server")
+      .filter(x => x.endsWith("-stats.json"))
+      .reduce((prev, x) => {
+        const k = Path.basename(x).split("-")[0];
+        prev[k] = `dist/server/${x}`;
+        return prev;
+      }, otherStats);
+  }
+  return otherStats;
+}
+
+function getOtherAssets(pluginOptions) {
+  return Object.entries(pluginOptions.otherStats).reduce((prev, [k, v]) => {
+    prev[k] = loadAssetsFromStats(getStatsPath(v, pluginOptions.buildArtifacts));
+    return prev;
+  }, {});
+}
+
+function getBundleJsNameByQuery(data, otherAssets) {
+  let { name } = data.jsChunk;
+  const { __dist } = data.query;
+  if (__dist && otherAssets[__dist]) {
+    name = `${__dist}${name.substr(name.indexOf("."))}`;
+  }
+  return name;
+}
+
+const munchyHandleStreamError = err => {
+  let errMsg = (process.env.NODE_ENV !== "production" && err.stack) || err.message;
+
+  if (process.cwd().length > 3) {
+    errMsg = (errMsg || "").replace(new RegExp(process.cwd(), "g"), "CWD");
+  }
+
+  return {
+    result: `<!-- SSR ERROR -->
+<p><h2 style="color: red">SSR ERROR</h2><pre style="color: red">
+${errMsg}
+</pre></p>`,
+    remit: false
+  };
+};
+
 module.exports = {
   resolveChunkSelector,
   loadAssetsFromStats,
   getIconStats,
   getCriticalCSS,
-  getStatsPath
+  getStatsPath,
+  resolvePath,
+  htmlifyError,
+  getDevCssBundle,
+  getDevJsBundle,
+  getProdBundles,
+  processRenderSsMode,
+  getCspNonce,
+  responseForError,
+  responseForBadStatus,
+  loadFuncFromModule,
+  invokeTemplateProcessor,
+  getOtherStats,
+  getOtherAssets,
+  getBundleJsNameByQuery,
+  isReadableStream: x => Boolean(x && x.pipe && x.on && x._readableState),
+  munchyHandleStreamError
 };

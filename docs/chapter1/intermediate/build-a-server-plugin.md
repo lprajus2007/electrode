@@ -1,6 +1,6 @@
 # Build a Server Plugin
 
-## Be Hapi and Build a server plugin
+## Be Hapi and build a server plugin!
 
 At WalmartLabs, we use [Hapi](http://hapijs.com/) because of its flexible and robust plugin system. It allows us to modularize our application into isolated pieces of business logic and reusable utilities.
 
@@ -16,7 +16,7 @@ $ npm install github
 
 At their core, plugins are a simple `register object` that has the signature `function (server, options, next)`. Read more about building plugins from scratch in the [Hapi documentation](http://hapijs.com/tutorials/plugins).
 
-Navigate to the  `<your-awesome-app>/src/server/plugins`  folder. Make a folder called `friends`, `cd` into your new `friends` folder, and create an empty `index.js`  file:
+Navigate to the `<your-awesome-app>/src/server/plugins` folder. Make a folder called `friends`, `cd` into your new `friends` folder, and create an empty `index.js` file:
 
 ```
 $ touch index.js
@@ -37,7 +37,7 @@ server
         └── index-view.jsx
 ```
 
-Navigate to `<your-awesome-app>/src/server/plugins/friends/index.js`. This is where we will make an external API call to Github and request the last ten contributors of our selected Open Source 'friend' using a URL `https://api.github.com/ + /repos/:user/:repo/contributors`. Our GitHub wrapper [library](https://github.com/mikedeboer/node-github) will allow us to use a built in method, `github.repos.getContributors({})`, to streamline this process and return an array of Open Source contributors. We will also use [Bluebird](http://bluebirdjs.com/docs/getting-started.html), a Promise library that makes working with our async API calls much more manageable. Copy, paste and save the code below:
+Navigate to `<your-awesome-app>/src/server/plugins/friends/index.js`. This is where we make an external API call to Github and request the last ten contributors of our selected Open Source 'friend' using the URL `https://api.github.com/ + /repos/:user/:repo/contributors`. Our GitHub wrapper [library](https://github.com/mikedeboer/node-github) allows us to use a built-in method, `github.repos.getContributors({})`, to streamline this process and return an array of open source contributors. We will also use [Bluebird](http://bluebirdjs.com/docs/getting-started.html), a Promise library that makes working with our async API calls much more manageable. Copy, paste, and save the code below:
 
 ```
 "use strict";
@@ -105,9 +105,9 @@ exports.register.attributes = {
 
 If you plan on building out Your Awesome App even further, you'll need to \[generate a GitHub Api oAuth token\] to remove the preset limit for API requests. We have already added the code to accept and use the token in our Hapi server plugin above `const AUTH_TOKEN = process.env.token`.
 
-Set a new [personal access token](http://www.electrode.io/docs/) \(you may be prompted to login to your GitHub account if you haven't already\), create your`token description` in the form given, and for `Select scopes` simply check `public repo`. Then hit the green `Generate token` button.
+Set a new [personal access token](https://docs.electrode.io/) \(you may be prompted to login to your GitHub account if you haven't already\), create your`token description` in the form given, and for `Select scopes` simply check `public repo`. Then hit the green `Generate token` button.
 
-You will be redirected to the next page to retrieve your token. Keep your token private and secure; do not copy and paste it directly into your app. Instead, we will set your token as a Node [environment variable](https://nodejs.org/api/process.html#process_process_env). Copy and save this token in a secure place; we will use it several times. Use this token in your command line as follows:
+You will be redirected to the next page to retrieve your token. Keep your token private and secure; do not copy and paste it directly into your app. Instead, set your token as a Node [environment variable](https://nodejs.org/api/process.html#process_process_env). Copy and save this token in a secure place; we will use it several times. Use this token in your command line as follows:
 
 Set the token locally:
 
@@ -121,5 +121,4 @@ Set your token for heroku deployment:
 heroku config:set token='your-token-here'
 ```
 
-A great tool for testing your server requests is [Postman](https://www.getpostman.com/). Its user interface for viewing response objects and errors is incredible. For now, you will have to trust us as we build out Your Awesome App. Navigate to [Intermediate: Add Routes](/docs/chapter1/intermediate/react-routes/add-routes.md), to add routing to the app and extend our UI to display our contributor array.
-
+A great tool for testing your server requests is [Postman](https://www.getpostman.com/). Its user interface for viewing response objects and errors is incredible. For now, we will build out Your Awesome App. Navigate to [Intermediate: Add Routes](/docs/chapter1/intermediate/react-routes/add-routes.md), to add routing to the app and extend our UI to display our contributor array.

@@ -1,6 +1,8 @@
+// @flow
+
 import { defineMessages } from "react-intl";
 
-const $tenant = process.env.ELECTRODE_TENANT;
+const $tenant: any = "electrodeio";
 let tenantMessages;
 
 try {
@@ -17,4 +19,4 @@ const messages = defineMessages({
   }
 });
 
-module.exports = Object.assign({}, messages, tenantMessages);
+export default Object.assign({}, messages, tenantMessages);

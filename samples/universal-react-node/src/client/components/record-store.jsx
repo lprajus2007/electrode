@@ -1,47 +1,57 @@
-import React from "react";
+// @flow
+
+import React, { Component } from "react";
 import RecordForm from "./record-form";
 
 const HTTP_BAD_REQUEST = 400;
 
-class RecordStore extends React.Component {
-  constructor(props) {
+type TypeState = {
+  records: [{}]
+};
+
+class RecordStore extends Component<string, TypeState> {
+  constructor(props: any) {
     super(props);
     this.state = {
-      records: [{
-        artist: "Led Zeppelin",
-        name: "IV",
-        _id: "1"
-      }]
+      records: [
+        {
+          artist: "Led Zeppelin",
+          name: "IV",
+          _id: "1"
+        }
+      ]
     };
   }
 
   componentDidMount() {
     fetch("/records")
-      .then((response) => {
+      .then(response => {
         if (response.status >= HTTP_BAD_REQUEST) {
           throw new Error("Bad response from server");
         }
-        response.json().then((records) => {
+        response.json().then(records => {
           this.setState({ records });
         });
       })
-      .catch((err) => {
-        throw new Error("Error Fetching Records", err);
+      .catch(() => {
+        throw new Error("Error Fetching Records");
       });
   }
 
   render() {
     return (
-      <div >
+      <div>
         <h2>Welcome to the Electrode Record Store</h2>
         <h3> Available Records</h3>
         <ul>
-          {this.state.records.map(record =>
-            <li key={record._id}>{record.name} By {record.artist}</li>
-          )}
+          {this.state.records.map((record: Object) => (
+            <li key={record._id}>
+              {record.name} By {record.artist}
+            </li>
+          ))}
         </ul>
         <RecordForm />
-      </div >
+      </div>
     );
   }
 }

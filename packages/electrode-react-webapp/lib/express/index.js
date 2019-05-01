@@ -1,67 +1,73 @@
 "use strict";
 
-/* eslint-disable no-magic-numbers */
+/* eslint-disable no-magic-numbers, max-params */
 
 const _ = require("lodash");
-const assert = require("assert");
 const ReactWebapp = require("../react-webapp");
 const HttpStatus = require("../http-status");
+const { responseForError, responseForBadStatus } = require("../utils");
 
-const handleRoute = (request, response, handler) => {
-  return handler({ mode: request.query.__mode || "", request })
-    .then(data => {
+const getDataHtml = data => (data.html !== undefined ? data.html : data);
+
+const DefaultHandleRoute = (request, response, handler, content, routeOptions) => {
+  return handler({ content, mode: request.query.__mode || "", request })
+    .then(context => {
+      const data = context.result;
+
+      if (data instanceof Error) {
+        throw data;
+      }
+
       const status = data.status;
 
       if (status === undefined) {
         response.send(data);
       } else if (HttpStatus.redirect[status]) {
         response.redirect(status, data.path);
-      } else if (HttpStatus.displayHtml[status]) {
-        response.status(status).send(data.html !== undefined ? data.html : data);
       } else if (status >= 200 && status < 300) {
-        response.send(data.html !== undefined ? data.html : data);
+        response.send(getDataHtml(data));
+      } else if (routeOptions.responseForBadStatus) {
+        const output = routeOptions.responseForBadStatus(request, routeOptions, data);
+        response.status(output.status).send(output.html);
       } else {
-        response.status(status).send(data);
+        response.status(status).send(getDataHtml(data));
       }
     })
-    .catch(err => response.status(err.status).send(err.message));
+    .catch(err => {
+      const output = routeOptions.responseForError(request, routeOptions, err);
+      response.status(output.status).send(output.html);
+    });
 };
 
 const registerRoutes = (app, options, next = () => {}) => {
   const registerOptions = ReactWebapp.setupOptions(options);
 
   _.each(registerOptions.paths, (v, path) => {
-    assert(v.content, `You must define content for the webapp plugin path ${path}`);
-
-    const resolveContent = () => {
-      if (registerOptions.serverSideRendering !== false) {
-        assert(
-          v.content !== undefined,
-          `You must define content for the webapp plugin path ${path}`
-        );
-        return ReactWebapp.resolveContent(v.content);
-      }
-      return { status: 200, html: "" };
-    };
-
     const routeOptions = _.defaults({ htmlFile: v.htmlFile }, registerOptions);
+    routeOptions.uiConfig = Object.assign({}, _.get(app, "config.ui", {}), routeOptions.uiConfig);
+    const routeHandler = ReactWebapp.makeRouteHandler(routeOptions);
+    const handleRoute = options.handleRoute || DefaultHandleRoute;
 
-    const routeHandler = ReactWebapp.makeRouteHandler(routeOptions, resolveContent());
+    _.defaults(routeOptions, { responseForError, responseForBadStatus });
 
-    /*eslint max-nested-callbacks: [0, 4]*/
+    const contentResolver = ReactWebapp.getContentResolver(registerOptions, v.content, path);
+
     let methods = v.method || ["GET"];
     if (!Array.isArray(methods)) {
       methods = [methods];
     }
+
     _.each(methods, method => {
       if (method === "*") {
         method = "ALL";
       }
-      app[method.toLowerCase()](path, (req, res) => handleRoute(req, res, routeHandler));
+      app[method.toLowerCase()](path, (req, res) => {
+        const content = contentResolver(req.app && req.app.webpackDev);
+        handleRoute(req, res, routeHandler, content, routeOptions);
+      });
     });
   });
 
-  // resolve promise
   next();
 };
 

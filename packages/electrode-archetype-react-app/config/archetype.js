@@ -6,25 +6,28 @@ const optionalRequire = require("optional-require")(require);
 const constants = require("./constants");
 const utils = require("../lib/utils");
 const makeAppMode = require("../lib/app-mode");
-const userConfig = optionalRequire(Path.resolve("archetype/config"), {
-  default: {
-    options: { reactLib: "react" }
-  }
-});
+const userConfig = Object.assign(
+  {
+    options: { reactLib: "react", karma: true, sass: false }
+  },
+  optionalRequire(Path.resolve("archetype/config"))
+);
 
 module.exports = {
   dir: Path.resolve(__dirname, ".."),
   pkg,
-  AppMode: makeAppMode(constants.PROD_DIR, userConfig.options && userConfig.options.reactLib),
+  options: userConfig.options,
+  AppMode: makeAppMode(constants.PROD_DIR, userConfig.options.reactLib),
   prodDir: constants.PROD_DIR,
   eTmpDir: constants.ETMP_DIR,
   prodModulesDir: Path.join(constants.PROD_DIR, "modules"),
   checkUserBabelRc: utils.checkUserBabelRc,
-  addArchetypeConfig: config => Object.assign(module.exports, config)
+  addArchetypeConfig: config => Object.assign(module.exports, config),
+  devArchetypeName: "electrode-archetype-react-app-dev"
 };
 
 function checkTopDevArchetype() {
-  const devArchName = "electrode-archetype-react-app-dev";
+  const devArchName = module.exports.devArchetypeName;
   const topPkg = require(Path.resolve("package.json"));
   // in case this is being used for test/dev in the -dev archetype
   if (topPkg.name === devArchName) {

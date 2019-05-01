@@ -55,14 +55,27 @@ class WebpackReporter extends EventEmitter {
   apply(config) {
     config = config.devServer || config;
     config.reporter = this._reporter.bind(this);
-    config.setup = this._setup.bind(this);
+    const setup = config.setup;
+    config.setup = app => {
+      if (setup) setup(app);
+      this._setup(app);
+    };
   }
 
-  _reporter(reporterOptions) {
+  //
+  // on webpack-dev-server version 3, this is called with (options, {
+  //       log,
+  //       state,
+  //       stats
+  //     })
+  //
+  _reporter(reporterOptions, reporterInfo) {
+    reporterInfo = reporterInfo || {};
+    Object.assign(reporterOptions, reporterInfo);
     if (reporterOptions.state) {
       const stats = reporterOptions.stats;
       this._reporterOptions = reporterOptions;
-      const opt = reporterOptions.options;
+      const opt = reporterOptions.options || reporterOptions;
       const error = stats.hasErrors() ? chalk.red(" ERRORS") : "";
       const warning = stats.hasWarnings() ? chalk.yellow(" WARNINGS") : "";
       const but = ((error || warning) && chalk.yellow(" but has")) || "";

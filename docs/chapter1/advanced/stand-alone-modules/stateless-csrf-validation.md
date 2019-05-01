@@ -51,7 +51,7 @@ Whichever platform you are using, an `options` property with a secret key is req
 
 > **options **\* `secret`: **Required**. A string or buffer containing either the secret for HMAC algorithms, or the PEM encoded private key for RSA and ECDSA.
 
-Other config properties are optional and follow the [same usage as jsonwebtoken](https://github.com/auth0/node-jsonwebtoken/blob/master/README.md#usage)
+Other configuration properties are optional and follow the [same usage as jsonwebtoken](https://github.com/auth0/node-jsonwebtoken/blob/master/README.md#usage)
 
 * `algorithm`
 * `expiresIn`
@@ -66,7 +66,7 @@ Other config properties are optional and follow the [same usage as jsonwebtoken]
 
 ### Electrode {#stateless-validation-electrode}
 
-All server configurations in [Electrode apps](/overview/what-is-electrode.md) are handled by the versatile [confippet](/chapter1/advanced/stand-alone-modules/confippet.md) module. The Stateless CSRF JWT Validation module can be easily configured by adding the following property to `config/default.json`:
+All server configurations in [Electrode apps](../../../what-is-electrode.md) are handled by the versatile [confippet](./confippet.md) module. The Stateless CSRF JWT Validation module can be easily configured by adding the following property to `config/default.json`:
 
 ```
 {
@@ -177,7 +177,7 @@ function doGet() {
         console.log("Got CSRF token OK");
         doPost(token);
       }
-    } 
+    }
   })
 }
 ```
@@ -185,4 +185,3 @@ function doGet() {
 In this example a `POST` request to `/2` can be made using the token retrieved from the `/1` endpoint.
 
 You can checkout our [Electrode Boilerplate React Application](https://github.com/electrode-io/electrode#boilerplate-universal-react-node) for a more detailed example.
-

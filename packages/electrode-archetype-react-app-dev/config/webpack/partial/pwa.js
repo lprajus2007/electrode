@@ -2,19 +2,23 @@
 
 const archetype = require("electrode-archetype-react-app/config/archetype");
 const Path = require("path");
+const requireAt = require("require-at");
 const AppMode = archetype.AppMode;
 
 const assign = require("lodash/assign");
 const fileLoader = require.resolve("file-loader");
-const webAppManifestLoader = require.resolve("web-app-manifest-loader");
-const SWPrecacheWebpackPlugin = require("../plugins/sw-precache");
-const FaviconsWebpackPlugin = require("../plugins/favicons");
-const AddManifestFieldsPlugin = require("../plugins/add-manifest-fields");
-const DiskPlugin = require("webpack-disk-plugin");
 const optionalRequire = require("optional-require")(require);
+//
+// load modules from within electrode-archetype-opt-pwa
+//
+const pwaRequire = requireAt(require.resolve("electrode-archetype-opt-pwa"));
+const webAppManifestLoader = pwaRequire.resolve("web-app-manifest-loader");
+const SWPrecacheWebpackPlugin = pwaRequire("./plugins/sw-precache");
+const FaviconsWebpackPlugin = pwaRequire("favicons-webpack-plugin");
+const AddManifestFieldsPlugin = pwaRequire("./plugins/add-manifest-fields");
+//
 
 const swConfigPath = Path.resolve("config", "sw-config.js");
-const serverConfigPath = Path.resolve("config", "default.json");
 const mkdirp = require("mkdirp");
 const logger = require("electrode-archetype-react-app/lib/logger");
 
@@ -70,7 +74,6 @@ function createEntryConfigFromScripts(importScripts, entry) {
 module.exports = function(options) {
   /* eslint max-statements: 0 */
   const swConfig = optionalRequire(swConfigPath, true) || {};
-  const severConfig = optionalRequire(serverConfigPath, true) || {};
 
   if (!swConfig.manifest) {
     return {};
@@ -117,15 +120,16 @@ module.exports = function(options) {
    * If importScripts exists in the cache config we need to overwrite
    * the entry config and output config so we get an entry point for each
    * script with unique names.
-    */
+   */
   let entry = options.currentConfig.entry;
   let output = {};
   if (cacheConfig.importScripts) {
     const importScripts = cacheConfig.importScripts;
 
-    cacheConfig.importScripts = process.env.WEBPACK_DEV === "true"
-      ? importScripts.map(getDevelopmentPath)
-      : importScripts.map(getHashedPath);
+    cacheConfig.importScripts =
+      process.env.WEBPACK_DEV === "true"
+        ? importScripts.map(getDevelopmentPath)
+        : importScripts.map(getHashedPath);
 
     entry = createEntryConfigFromScripts(importScripts, options.currentConfig.entry);
 
@@ -157,30 +161,6 @@ module.exports = function(options) {
     }),
     new SWPrecacheWebpackPlugin(cacheConfig)
   ];
-
-  /**
-   * In dev we need to write the stats file to disk
-   * so we can properly read which chunk(s) need to be
-   * served. We write the stats file to our build artifacts
-   * folder, which is .etmp by default.
-   */
-  if (process.env.WEBPACK_DEV === "true") {
-    plugins.push(
-      new DiskPlugin({
-        output: {
-          path: Path.resolve(severConfig.buildArtifactsPath || ".etmp")
-        },
-        files: [
-          {
-            asset: /\/stats.json$/,
-            output: {
-              filename: "stats.json"
-            }
-          }
-        ]
-      })
-    );
-  }
 
   return {
     entry,

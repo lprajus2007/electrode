@@ -1,77 +1,84 @@
 "use strict";
 
-/* eslint-disable generator-star-spacing, no-invalid-this */
-/* eslint-disable no-magic-numbers, prefer-arrow-callback */
+/* eslint-disable no-magic-numbers, max-params */
 
 const _ = require("lodash");
-const assert = require("assert");
 const ReactWebapp = require("../react-webapp");
 const HttpStatus = require("../http-status");
+const { responseForError, responseForBadStatus } = require("../utils");
 
-function handleRoute(handler) {
-  const request = this.request;
-  const respond = (status, data) => {
-    this.status = status;
-    this.body = data;
-  };
+const getDataHtml = data => (data.html !== undefined ? data.html : data);
 
-  return handler({ mode: request.query.__mode || "", request })
-    .then(data => {
-      const status = data.status;
-
-      if (status === undefined) {
-        respond(200, data);
-      } else if (HttpStatus.redirect[status]) {
-        this.redirect(data.path);
-      } else if (HttpStatus.displayHtml[status]) {
-        respond(status, data.html !== undefined ? data.html : data);
-      } else if (status >= 200 && status < 300) {
-        respond(status, data.html !== undefined ? data.html : data);
-      } else {
-        respond(status, data);
+const DefaultHandleRoute = (request, response, handler, content, routeOptions) => {
+  return handler({ content, mode: request.query.__mode || "", request })
+    .then(context => {
+      const data = context.result;
+      if (data instanceof Error) {
+        throw data;
       }
+
+      if (data.status === undefined) {
+        response.status = 200;
+        response.body = data;
+      } else if (HttpStatus.redirect[data.status]) {
+        response.redirect(data.path);
+        response.status = data.status;
+      } else if (data.status >= 200 && data.status < 300) {
+        response.body = getDataHtml(data);
+      } else if (routeOptions.responseForBadStatus) {
+        const output = routeOptions.responseForBadStatus(request, routeOptions, data);
+        response.status = output.status;
+        response.body = output.html;
+      } else {
+        response.status = data.status;
+        response.body = getDataHtml(data);
+      }
+      return response;
     })
     .catch(err => {
-      respond(err.status, err.message);
+      const output = routeOptions.responseForError(request, routeOptions, err);
+      response.status = output.status;
+      response.body = output.html;
     });
-}
+};
 
-const registerRoutes = (router, options) => {
+const registerRoutes = (router, options, next = () => {}) => {
   const registerOptions = ReactWebapp.setupOptions(options);
 
   _.each(registerOptions.paths, (v, path) => {
-    assert(v.content, `You must define content for the webapp plugin path ${path}`);
-    const resolveContent = () => {
-      if (registerOptions.serverSideRendering !== false) {
-        assert(
-          v.content !== undefined,
-          `You must define content for the webapp plugin path ${path}`
-        );
-        return ReactWebapp.resolveContent(v.content);
-      }
-      return { status: 200, html: "" };
-    };
-
     const routeOptions = _.defaults({ htmlFile: v.htmlFile }, registerOptions);
+    const routeHandler = ReactWebapp.makeRouteHandler(routeOptions);
 
-    const routeHandler = ReactWebapp.makeRouteHandler(routeOptions, resolveContent());
+    routeOptions.uiConfig = Object.assign(
+      {},
+      _.get(router, "config.ui", {}),
+      routeOptions.uiConfig
+    );
+
+    const handleRoute = options.handleRoute || DefaultHandleRoute;
+    _.defaults(routeOptions, { responseForError, responseForBadStatus });
 
     let methods = v.method || ["GET"];
     if (!Array.isArray(methods)) {
       methods = [methods];
     }
 
+    const contentResolver = ReactWebapp.getContentResolver(registerOptions, v.content, path);
+
     _.each(methods, method => {
       if (method === "*") {
         method = "ALL";
       }
 
-      /*eslint max-nested-callbacks: [0, 4]*/
-      router(method.toLowerCase(), path, function() {
-        return handleRoute.call(this, routeHandler);
-      }); //end get
+      router[method.toLowerCase()](path, async (ctx, next1) => {
+        const content = contentResolver(ctx.webpackDev);
+        await handleRoute(ctx.request, ctx.response, routeHandler, content, routeOptions);
+        return next1();
+      });
     });
   });
+
+  next();
 };
 
 module.exports = registerRoutes;

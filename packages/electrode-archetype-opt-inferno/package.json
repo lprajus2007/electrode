@@ -1,6 +1,6 @@
 {
   "name": "electrode-archetype-opt-inferno",
-  "version": "0.2.2",
+  "version": "0.2.6",
   "description": "Electrode NodeJS/React Optional Archetype - inferno",
   "main": "index.js",
   "homepage": "http://www.electrode.io",
@@ -11,12 +11,25 @@
   "bugs": {
     "url": "https://github.com/electrode-io/electrode/issues"
   },
+  "files": [
+    "optional-check.js"
+  ],
   "license": "Apache-2.0",
   "scripts": {
-    "preinstall": "node optional-check.js"
+    "test": "echo OK",
+    "coverage": "echo OK",
+    "preinstall": "node optional-check.js",
+    "prepare": "cp node_modules/opt-archetype-check/optional-check.js ."
   },
   "dependencies": {
     "inferno": "^3.0.0",
     "inferno-compat": "^3.0.0"
+  },
+  "devDependencies": {
+    "opt-archetype-check": "../opt-archetype-check"
+  },
+  "electrodeOptArchetype": {
+    "optionalTagName": "reactLib",
+    "expectTag": "inferno"
   }
 }

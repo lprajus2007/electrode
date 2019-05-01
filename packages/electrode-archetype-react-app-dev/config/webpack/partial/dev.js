@@ -1,7 +1,6 @@
 "use strict";
 
 const ExtractTextPlugin = require("extract-text-webpack-plugin");
-const webpack = require("webpack");
 const archetype = require("electrode-archetype-react-app/config/archetype");
 const webpackDevReporter = require("../util/webpack-dev-reporter");
 
@@ -9,6 +8,11 @@ const devProtocol = archetype.webpack.https ? "https://" : "http://";
 
 module.exports = function() {
   const devServerConfig = {
+    hot: archetype.webpack.enableHotModuleReload,
+    overlay: {
+      errors: true,
+      warnings: archetype.webpack.enableWarningsOverlay
+    },
     reporter: webpackDevReporter,
     https: Boolean(archetype.webpack.https)
   };
@@ -16,8 +20,9 @@ module.exports = function() {
   if (process.env.WEBPACK_DEV_HOST || process.env.WEBPACK_HOST) {
     devServerConfig.public = `${archetype.webpack.devHostname}:${archetype.webpack.devPort}`;
     devServerConfig.headers = {
-      "Access-Control-Allow-Origin": `${devProtocol}${archetype.webpack.devHostname}:${archetype
-        .webpack.devPort}`
+      "Access-Control-Allow-Origin": `${devProtocol}${archetype.webpack.devHostname}:${
+        archetype.webpack.devPort
+      }`
     };
   } else {
     devServerConfig.disableHostCheck = true;
@@ -32,11 +37,11 @@ module.exports = function() {
       publicPath: `${devProtocol}${archetype.webpack.devHostname}:${archetype.webpack.devPort}/js/`,
       filename: "[name].bundle.dev.js"
     },
-    plugins: [
-      new webpack.SourceMapDevToolPlugin("[file].map"),
-      new ExtractTextPlugin({ filename: "[name].style.css" }),
-      new webpack.NoEmitOnErrorsPlugin()
-    ]
+    devtool: "inline-source-map",
+    plugins: [new ExtractTextPlugin({ filename: "[name].style.css" })],
+    optimization: {
+      noEmitOnErrors: true
+    }
   };
 
   return config;

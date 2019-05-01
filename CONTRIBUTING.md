@@ -8,33 +8,39 @@ There are [few guidelines](#contributing-guidelines) that we request contributor
 
 This repo uses [Lerna] as a top level setup and [fyn] to manage Node Modules.
 
-* Install these CLI tools globally: [xclap-cli] and [fyn]
+### Setup
+
+Install these CLI tools globally: [xclap-cli] and [fyn]
 
 ```bash
 $ npm install -g xclap-cli fyn
+$ fyn -V
+0.1.76
 ```
 
-* Fork and clone the repo at <https://github.com/electrode-io/electrode.git>
+> Make sure `fyn`'s version is at least `0.1.76`
+
+Fork and clone the repo at <https://github.com/electrode-io/electrode.git> and bootstrap all the packages.
 
 ```bash
 $ git clone https://github.com/<your-github-id>/electrode.git
 $ cd electrode
-```
-
-* Quick Test
-
-Run at the top level:
-
-```bash
-$ eval `fyn bash`
-$ fyn
+$ npm install
 $ npm run bootstrap
 ```
 
-* Now you can go to the `samples` folder and try the `universal-react-node` sample app, develop and test your changes over there.
+### Quick Test
+
+Because many of our modules depend on each other, to make local development easier, we use [fyn] to install packages when doing development.
+
+#### Try a sample
+
+Now you can go to the `samples` folder and try the `universal-react-node` sample app, develop and test your changes over there.
 
 ```bash
-$ cd samples/universal-react-node
+$ cd samples/react-vendor-dll
+$ fyn
+$ cd ../universal-react-node
 $ fyn
 $ clap dev
 ```
@@ -43,11 +49,18 @@ After running above, you should see a similar text as `Hapi.js server running at
 
 And when you open the browser at `http://localhost:3000`, you should see a large Electrode icon with a few demonstration components.
 
-You can also run in `hot` mode. However, `hot` mode is still experimental and there may be issues.
+#### Test with generator
+
+You can quickly use the generator to create an app in `tmp/hapi-app` for testing.
 
 ```bash
-$ clap hot
+$ clap gen-hapi-app
+$ cd tmp/hapi-app
+$ fyn
+$ clap dev
 ```
+
+This sample app is using [fyn] to directly linked to the modules under the `packages` directory. Changes made there will be reflected in the app immediately. This is the typical testing and developing flow we use.
 
 ## Contributing Guidelines
 
@@ -69,12 +82,12 @@ Since we use independent lerna mode, to help keep the changelog clear, please fo
 
 `[<semver>][feat|bug|chore] <message>`
 
-* `<semver>` can be:
-  * `major` - `maj` or `major`
-  * `minor` - `min` or `minor`
-  * `patch` - `pat` or `patch`
-* Only include `[feat|bug|chore]` if it's applicable.
-* Please format your PR's title with the same format.
+- `<semver>` can be:
+  - `major` - `maj` or `major`
+  - `minor` - `min` or `minor`
+  - `patch` - `pat` or `patch`
+- Only include `[feat|bug|chore]` if it's applicable.
+- Please format your PR's title with the same format.
 
 > **_Please do everything you can to keep commits for a PR to a single package in `packages`._**
 
@@ -92,24 +105,27 @@ We love to hear about your experience using Electrode and bug reports. Electrode
 
 When you submit a bug report, please include the following information:
 
-* NodeJS/npm versions by doing `nodev -v` and `npm -v`
-* Your OS and version
-* Electrode package versions
-* Any errors output
-* If possible, sample code and steps on how to reproduce the bug
+- NodeJS/npm versions by doing `nodev -v` and `npm -v`
+- Your OS and version
+- Electrode package versions
+- Any errors output
+- If possible, sample code and steps on how to reproduce the bug
 
 ## Updating Docs
 
 This repo has a [gitbook] documentation under `docs`. To review the docs as a gitbook locally:
 
-* Install [gitbook-cli] and the plugins for our docs
+- Install [gitbook-cli] and the plugins for docs.
+- Note that gitbook (3.2.3) uses npm (3.9.2) to manage its own plugins and that may conflict with [fyn] installed `node_modules`.
+  - which is why for the top level dir of our lerna repo, we use `npm install` directly.
 
 ```bash
+$ cd electrode
 $ npm install gitbook-cli -g
 $ gitbook install
 ```
 
-* Serve the book locally
+- Now serve the book locally
 
 ```bash
 $ gitbook serve --no-watch --no-live
@@ -119,7 +135,20 @@ And open your browser to `http://localhost:4000` to view the docs.
 
 Here is the documentation on a [gitbook] structure: <https://toolchain.gitbook.com/structure.html>
 
-> Without the `--no-watch --no-live` options it becomes unusably slow on my machine.
+> Without the `--no-watch --no-live` options it becomes unusably slow on my machine.\
+> If things don't work, then remove `~/.gitbook` and run `gitbook install` or `gitbook fetch` to let it reset itself.
+
+## Releasing
+
+The versioning of modules in the this repo are all automatically controlled by the commit message.
+
+It's important that commits are isolated for the package they affected only and contains the version tags `[major]`, `[minor]`, or `[patch]`. `[patch]` is the default if tag is not found in commit message.
+
+To release, there are three steps:
+
+1. Use `clap update-changelog` to detect packages that changed and their version bumps.
+2. Run `npx fynpo prepare` to look at `CHANGELOG.md` and update dependencies and versions.
+3. Publish the packages that `fynpo prepare` shown that has updates.
 
 [gitbook-cli]: https://www.npmjs.com/package/gitbook-cli
 [prettier]: https://www.npmjs.com/package/prettier

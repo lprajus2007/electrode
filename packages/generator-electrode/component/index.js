@@ -127,9 +127,9 @@ module.exports = class extends Generator {
       },
       {
         type: "confirm",
-        name: "yarn",
-        message: "Would you like to yarn install packages?",
-        when: this.props.yarn === undefined,
+        name: "flow",
+        message: "Would you like to generate .flowconfig for flow usage?",
+        when: this.props.flow === undefined,
         default: false
       }
     ];
@@ -150,7 +150,9 @@ module.exports = class extends Generator {
       this.ghRepo = this.props.ghRepo;
       this.packageGitHubOrg = this.props.packageGitHubOrg;
       this.createDirectory = this.props.createDirectory;
-      this.componentName = _.kebabCase(_.deburr(this.props.projectName))
+      this.flow = this.props.flow;
+      this.componentName = _
+        .kebabCase(_.deburr(this.props.projectName))
         .replace(/^\s+|\s+$/g, "")
         .replace(/(^|[-_ ])+(.)/g, function(match, first, second) {
           return second.toUpperCase();
@@ -261,6 +263,12 @@ module.exports = class extends Generator {
         this.fs.copy(
           this.templatePath("packages/component/eslintrc"),
           this.destinationPath(".eslintrc")
+        );
+      }
+      if (this.flow) {
+        this.fs.copy(
+          this.templatePath("packages/component/flowconfig"),
+          this.destinationPath(this.rootPath + ".flowconfig")
         );
       }
       this.fs.copyTpl(
@@ -437,7 +445,6 @@ module.exports = class extends Generator {
   }
 
   install() {
-    const yarnOrNpm = this.props.yarn ? "yarn" : "npm";
     let locations = [
       this.destinationPath(),
       path.join(this.destinationPath(), "..", "..", this.originalDemoAppName)
@@ -458,7 +465,7 @@ module.exports = class extends Generator {
     locations.reduce(
       (previousValue, currentValue) => {
         if (!previousValue.signal && previousValue.status === 0) {
-          return this.spawnCommandSync(yarnOrNpm, ["install"], {
+          return this.spawnCommandSync("npm", ["install"], {
             cwd: currentValue
           });
         } else {

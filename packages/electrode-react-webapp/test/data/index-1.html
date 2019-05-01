@@ -1,3 +1,4 @@
+<!--%{INITIALIZE}-->
 <!DOCTYPE html>
 <html lang="en">
 
@@ -8,12 +9,14 @@
   <!--%{PAGE_TITLE}-->
   <!--%{CRITICAL_CSS}-->
   <!--%{WEBAPP_HEADER_BUNDLES}-->
+  <!--%{ user-header-token }-->
 </head>
 
 <body>
   <div>test html-1</div>
   <!--%{user-spot-token}-->
   <div class="js-content">
+    <!--%{user-token-unhandled}-->
     <!--%{SSR_CONTENT}-->
   </div>
   <!--%{PREFETCH_BUNDLES}-->
@@ -22,7 +25,7 @@
   <script>
     if (window.webappStart) webappStart();
   </script>
-  <!--%{#./test/fixtures/custom-1}-->
+  <!--%{#../fixtures/custom-1}-->
   <!--%{user-token-1}-->
   <!--%{user-token-2}-->
   <noscript>

@@ -1,10 +1,11 @@
 {
   "name": "electrode-webpack-reporter",
-  "version": "0.4.2",
+  "version": "0.5.1",
   "description": "A HTML based reporter for webpack dev server",
   "main": "lib/webpack-reporter.js",
   "scripts": {
     "test": "clap check",
+    "coverage": "clap check",
     "prepare": "clap build"
   },
   "repository": {
@@ -18,6 +19,11 @@
   ],
   "author": "Joel Chen <xchen@walmartlabs.com>",
   "license": "Apache-2.0",
+  "files": [
+    "config",
+    "dist",
+    "lib"
+  ],
   "devDependencies": {
     "classnames": "^2.2.5",
     "electrode-archetype-react-app": "../electrode-archetype-react-app",
@@ -28,6 +34,8 @@
     "electrode-static-paths": "^1.1.0",
     "material-design-icons": "^3.0.1",
     "material-ui": "^0.20.0",
+    "react": "16.3.2",
+    "react-dom": "16.3.3",
     "react-tap-event-plugin": "^3.0.2",
     "xclap": "^0.2.0"
   },

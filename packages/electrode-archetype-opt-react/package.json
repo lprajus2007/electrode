@@ -1,6 +1,6 @@
 {
   "name": "electrode-archetype-opt-react",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "Electrode NodeJS/React Optional Archetype - react",
   "main": "index.js",
   "homepage": "http://www.electrode.io",
@@ -13,10 +13,22 @@
   },
   "license": "Apache-2.0",
   "scripts": {
-    "preinstall": "node optional-check.js"
+    "preinstall": "node optional-check.js",
+    "prepare": "cp node_modules/opt-archetype-check/optional-check.js ."
   },
+  "files": [
+    "optional-check.js"
+  ],
   "dependencies": {
     "react": "^16.0.0",
     "react-dom": "^16.0.0"
+  },
+  "devDependencies": {
+    "opt-archetype-check": "../opt-archetype-check"
+  },
+  "electrodeOptArchetype": {
+    "optionalTagName": "reactLib",
+    "expectTag": "react",
+    "defaultInstall": true
   }
 }

@@ -2,14 +2,15 @@
 
 /* eslint-disable arrow-parens */
 
-var Generator = require("yeoman-generator");
-var chalk = require("chalk");
-var yosay = require("yosay");
-var path = require("path");
-var _ = require("lodash");
-var extend = _.merge;
-var parseAuthor = require("parse-author");
-var githubUsername = require("github-username");
+const Generator = require("yeoman-generator");
+const chalk = require("chalk");
+const yosay = require("yosay");
+const path = require("path");
+const _ = require("lodash");
+const extend = _.merge;
+const parseAuthor = require("parse-author");
+const githubUsername = require("github-username");
+const Fs = require("fs");
 
 const ExpressJS = "ExpressJS";
 const HapiJS = "HapiJS";
@@ -66,6 +67,34 @@ module.exports = class extends Generator {
       desc: "Content to insert in the README.md file"
     });
 
+    this.option("cookiesModule", {
+      type: String,
+      required: false,
+      default: "electrode-cookies",
+      desc: "Universal cookies module name"
+    });
+
+    this.option("cookiesModuleSemver", {
+      type: String,
+      required: false,
+      default: "^1.0.0",
+      desc: "Universal cookies module semver"
+    });
+
+    this.option("uiConfigModule", {
+      type: String,
+      required: false,
+      default: "electrode-ui-config",
+      desc: "Universal UI config module name"
+    });
+
+    this.option("uiConfigModuleSemver", {
+      type: String,
+      required: false,
+      default: "^1.1.2",
+      desc: "Universal UI config module semver"
+    });
+
     //Data should be passed to the generator using props
     this.props = this.options.props || {};
     //Flag to check if the OSS generator is being called as a subgenerator
@@ -86,7 +115,9 @@ module.exports = class extends Generator {
       this.props.createDirectory = false;
       this.props.serverType = this.fs.exists(this.destinationPath("src/server/express-server.js"))
         ? ExpressJS
-        : this.fs.exists(this.destinationPath("src/server/koa-server.js")) ? KoaJS : HapiJS;
+        : this.fs.exists(this.destinationPath("src/server/koa-server.js"))
+        ? KoaJS
+        : HapiJS;
       this.props.pwa = this.fs.exists(this.destinationPath("client/sw-registration.js"));
       this.props.autoSsr = this.fs.exists(this.destinationPath("server/plugins/autossr.js"));
       this.props.quoteType =
@@ -97,6 +128,8 @@ module.exports = class extends Generator {
       this.props.authorEmail = info.email;
       this.props.authorUrl = info.url;
     }
+    // disable auto ssr (need to update to Hapi 17)
+    this.props.autoSsr = false;
     // Pre set the default props from the information we have at this point
     this.props = extend(
       {
@@ -107,6 +140,17 @@ module.exports = class extends Generator {
       },
       this.props
     );
+  }
+
+  _cookiesModule() {
+    if (this.config.get("serverType") === HapiJS) {
+      return this.options.cookiesModule;
+    }
+    return undefined;
+  }
+
+  _isCwdEmpty() {
+    return Fs.readdirSync(process.cwd()).length < 1;
   }
 
   _askFor() {
@@ -178,13 +222,13 @@ module.exports = class extends Generator {
         when: this.props.pwa === undefined,
         default: false
       },
-      {
-        type: "confirm",
-        name: "autoSsr",
-        message: "Support disabling server side rendering based on high load?",
-        when: this.props.autoSsr === undefined,
-        default: false
-      },
+      // {
+      //   type: "confirm",
+      //   name: "autoSsr",
+      //   message: "Support disabling server side rendering based on high load?",
+      //   when: false,
+      //   default: false
+      // },
       {
         type: "list",
         name: "quoteType",
@@ -198,13 +242,13 @@ module.exports = class extends Generator {
         name: "createDirectory",
         message: "Would you like to create a new directory for your project?",
         when: this.props.createDirectory === undefined,
-        default: true
+        default: this._isCwdEmpty() ? false : true
       },
       {
         type: "confirm",
-        name: "yarn",
-        message: "Would you like to yarn install packages?",
-        when: this.props.yarn === undefined,
+        name: "flow",
+        message: "Would you like to generate .flowconfig for flow usage?",
+        when: this.props.flow === undefined,
         default: false
       }
     ];
@@ -255,6 +299,10 @@ module.exports = class extends Generator {
     const isSingleQuote = this.props.quoteType === "'";
     const className = this.props.className;
     const packageName = this.props.packageName;
+    const cookiesModule = this._cookiesModule();
+    const cookiesModuleSemver = this.options.cookiesModuleSemver;
+    const uiConfigModule = this.options.uiConfigModule;
+    const uiConfigModuleSemver = this.options.uiConfigModuleSemver;
 
     let ignoreArray = [];
     if (isHapi) {
@@ -266,27 +314,38 @@ module.exports = class extends Generator {
       ignoreArray.push("**/src/server/express-server.js");
     }
 
-    // Re-read the content at this point because a composed generator might modify it.
-    var currentPkg = this.fs.readJSON(this.destinationPath("package.json"), {});
+    // process default _package.js template
+    const _pkgJs = "_package.js";
 
-    const _pkg = "_package.json";
-
-    this.fs.copyTpl(this.templatePath(_pkg), this.destinationPath(_pkg), {
+    this.fs.copyTpl(this.templatePath(_pkgJs), this.destinationPath(_pkgJs), {
       isHapi,
       isExpress,
       isPWA,
       isAutoSSR,
-      isSingleQuote
+      isSingleQuote,
+      projectName: this.props.name,
+      cookiesModule,
+      cookiesModuleSemver,
+      uiConfigModule,
+      uiConfigModuleSemver
     });
 
-    var defaultPkg = this.fs.readJSON(this.destinationPath(_pkg));
-    this.fs.delete(this.destinationPath(_pkg));
+    const jsPkg = this.fs.read(this.destinationPath(_pkgJs)).toString();
 
+    const defaultPkg = Function(`"use strict";` + jsPkg)();
+    this.fs.delete(this.destinationPath(_pkgJs));
+
+    // Re-read the content at this point because a composed generator might modify it.
+    const currentPkg = this.fs.readJSON(this.destinationPath("package.json"), {});
+
+    // delete certain empty fields in existing package.json
     ["name", "version", "description", "homepage", "main", "license"].forEach(x => {
-      currentPkg[x] = currentPkg[x] || undefined;
+      if (currentPkg.hasOwnProperty(x) && !currentPkg[x]) {
+        delete currentPkg[x];
+      }
     });
 
-    var packageContents = {
+    const packageContents = {
       name: _.kebabCase(this.props.name),
       version: "0.0.1",
       description: this.props.description,
@@ -300,15 +359,16 @@ module.exports = class extends Generator {
       main: path.posix.join("lib", this.options.projectRoot, "index.js"),
       keywords: []
     };
+
     if (this.isDemoApp) {
       packageContents.dependencies = {};
       packageContents.dependencies[this.props.packageName] =
         "../packages/" + this.props.packageName;
     }
 
-    var updatePkg = _.defaultsDeep(currentPkg, packageContents);
+    const updatePkg = _.defaultsDeep(currentPkg, packageContents);
 
-    var pkg = extend({}, defaultPkg, updatePkg);
+    const pkg = extend({}, defaultPkg, updatePkg);
 
     // Combine the keywords
     if (this.props.keywords) {
@@ -328,12 +388,18 @@ module.exports = class extends Generator {
     // Let's extend package.json so we're not overwriting user previous fields
     this.fs.writeJSON(this.destinationPath("package.json"), pkg);
 
-    const rootConfigsToCopy = ["xclap.js", "config", "test"];
-    rootConfigsToCopy.push(".eslintrc.js");
+    const configSrcDir = this.props.serverType.toLowerCase();
+
+    const rootConfigsToCopy = [["xclap.js"], [`config/${configSrcDir}`, "config"], ["test"]];
+
+    if (this.props.flow) {
+      rootConfigsToCopy.push([".flowconfig"]);
+    }
+    rootConfigsToCopy.push([".eslintrc.js"]);
     rootConfigsToCopy.forEach(f => {
       this.fs.copyTpl(
-        this.templatePath(f),
-        this.destinationPath(f),
+        this.templatePath(f[0]),
+        this.destinationPath(f[1] || f[0]),
         { isSingleQuote },
         {},
         { globOptions: { dot: true } }
@@ -361,7 +427,7 @@ module.exports = class extends Generator {
     this.fs.copyTpl(
       this.templatePath("src/client"),
       this.destinationPath("src/client"),
-      { pwa: isPWA },
+      { pwa: isPWA, cookiesModule, uiConfigModule },
       {}, // template options
       {
         // copy options
@@ -392,65 +458,54 @@ module.exports = class extends Generator {
     this.composeWith(require.resolve("../editorconfig"));
 
     if (!this.isDemoApp) {
-      this.composeWith(require.resolve("../git"), {
-        name: this.props.name,
-        githubAccount: this.props.githubAccount,
-        githubUrl: this.props.githubUrl
-      });
+      this.composeWith(
+        require.resolve("../git"),
+        _.pick(this.props, ["name", "githubAccount", "githubUrl"])
+      );
     }
 
     if (this.options.license && !this.pkg.license) {
-      this.composeWith(require.resolve("generator-license"), {
-        name: this.props.authorName,
-        email: this.props.authorEmail,
-        website: this.props.authorUrl,
-        license: this.props.license || ""
-      });
+      this.composeWith(
+        require.resolve("generator-license"),
+        _.pick(this.props, ["name", "email", "website", "license"])
+      );
     }
 
     if (!this.fs.exists(this.destinationPath("README.md"))) {
-      this.composeWith(require.resolve("../readme"), {
-        name: this.props.name,
-        description: this.props.description,
-        githubAccount: this.props.githubAccount,
-        authorName: this.props.authorName,
-        authorUrl: this.props.authorUrl,
-        content: this.options.readme
-      });
+      this.composeWith(
+        require.resolve("../readme"),
+        _.pick(this.props, [
+          "name",
+          "description",
+          "githubAccount",
+          "authorName",
+          "authorUrl",
+          "content"
+        ])
+      );
     }
 
-    if (!this.fs.exists(this.destinationPath("config/default.js")) && !this.isExtended) {
-      this.composeWith(require.resolve("../config"), {
-        name: this.props.name,
-        pwa: this.props.pwa,
-        serverType: this.props.serverType,
-        isAutoSsr: this.props.autoSsr
-      });
-    }
+    const configProps = _.pick(this.props, ["name", "pwa", "serverType", "autoSsr"]);
+    configProps._extended = this.isExtended;
+    configProps.cookiesModule = this._cookiesModule();
+    this.composeWith(require.resolve("../config"), configProps);
 
     if (!this.fs.exists(this.destinationPath("server/plugins/webapp"))) {
-      this.composeWith(require.resolve("../webapp"), {
-        pwa: this.props.pwa,
-        isAutoSsr: this.props.autoSsr
-      });
+      this.composeWith(require.resolve("../webapp"), _.pick(this.props, ["pwa", "serverType"]));
     }
   }
 
   install() {
     if (!this.isExtended && !this.isDemoApp) {
-      if (this.props.yarn) {
-        this.yarnInstall();
-      } else {
-        this.installDependencies({
-          bower: false
-        });
-      }
+      this.installDependencies({
+        bower: false
+      });
     }
   }
 
   end() {
     if (!this.isDemoApp) {
-      var chdir = this.props.createDirectory
+      const chdir = this.props.createDirectory
         ? "'cd " + _.kebabCase(_.deburr(this.props.name)) + "' then "
         : "";
       this.log(

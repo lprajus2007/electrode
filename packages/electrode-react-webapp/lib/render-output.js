@@ -2,26 +2,25 @@
 
 const assert = require("assert");
 const Promise = require("bluebird");
-const HttpStatusCodes = require("http-status-codes");
 
 class Output {
   constructor() {
-    this.length = 0;
-    this._items = {};
+    this._items = [];
   }
 
   add(data) {
-    const x = this.length;
-    this._items[x] = data;
-    this.length++;
+    const x = this._items.length;
+    this._items.push(data);
     return x;
   }
 
+  get length() {
+    return this._items.length;
+  }
+
   stringify() {
-    let i;
     let out = "";
-    for (i = 0; i < this.length; ++i) {
-      const x = this._items[i];
+    for (const x of this._items) {
       if (typeof x === "string") {
         out += x;
       } else {
@@ -29,6 +28,25 @@ class Output {
       }
     }
     return out;
+  }
+
+  _munchItems(munchy) {
+    for (const item of this._items) {
+      if (item._munchItems) {
+        item._munchItems(munchy);
+      } else {
+        munchy.munch(item);
+      }
+    }
+  }
+
+  sendToMunchy(munchy, done) {
+    if (this._items.length > 0) {
+      munchy.once("munched", done);
+      this._munchItems(munchy);
+    } else {
+      process.nextTick(done);
+    }
   }
 }
 
@@ -42,7 +60,10 @@ class SpotOutput extends Output {
 
   add(data) {
     assert(this._open, "SpotOutput closed");
-    assert(typeof data === "string", "Must add only string to SpotOutput");
+    assert(
+      typeof data === "string" || Buffer.isBuffer(data) || (data && data._readableState),
+      "Must add only string/buffer/stream to SpotOutput"
+    );
     return super.add(data);
   }
 
@@ -72,8 +93,7 @@ class MainOutput extends Output {
   }
 
   _addSpot(data) {
-    const x = this.length;
-    this.add(data);
+    const x = this.add(data);
     this._pending++;
     return x;
   }
@@ -92,9 +112,8 @@ class RenderOutput {
   constructor(context) {
     this._output = new MainOutput();
     this._flushQ = [];
-    this._context = context || {};
+    this._context = context || { transform: x => x };
     this._result = ""; // will hold final result if context doesn't have send
-    this._send = this._context.send ? x => this._context.send(x) : x => (this._result += x);
   }
 
   // add data to the end of the output
@@ -119,9 +138,13 @@ class RenderOutput {
 
   // flush data so far
   flush() {
-    if (this._output.length > 0) {
+    if (this._output && this._output.length > 0) {
       this._flushQ.push(this._output);
-      this._output = new MainOutput();
+      if (!this._end) {
+        this._output = new MainOutput();
+      } else {
+        this._output = undefined;
+      }
     }
 
     this._checkFlushQ();
@@ -130,44 +153,73 @@ class RenderOutput {
   // close the output and returns a promise that waits for all pending
   // spots to close and resolves with the final result
   close() {
-    const promise = new Promise((resolve, reject) => {
-      this._resolve = resolve;
-      this._reject = reject;
-    });
-    this.flush();
-    return promise;
-  }
+    this._end = true;
 
-  _getResolveResult() {
-    const { content } = this._context;
-    if (content && content.status !== HttpStatusCodes.OK) {
-      return {
-        status: this._context.content.status,
-        html: this._result
-      };
+    if (this._context.munchy) {
+      this.flush();
+      // streaming
+      return this._context.transform(this._context.munchy, this);
+    } else {
+      const promise = new Promise((resolve, reject) => {
+        this._resolve = resolve;
+        this._reject = reject;
+      });
+      this.flush();
+      return promise;
     }
-
-    return this._result;
   }
 
   _finish() {
-    if (this._resolve) {
-      this._resolve(this._getResolveResult());
+    try {
+      if (this._context.munchy) {
+        // terminates munchy stream
+        this._result = this._context.munchy;
+        this._context.munchy.munch(null);
+      }
+
+      if (this._resolve) {
+        this._resolve(this._context.transform(this._result, this));
+      }
+    } catch (error) {
+      if (this._reject) {
+        this._reject(error);
+      } else {
+        throw error;
+      }
     }
+
     this._resolve = this._reject = undefined;
   }
 
   _checkFlushQ() {
     if (this._flushQ.length < 1) {
-      this._finish();
+      if (this._end) {
+        this._finish();
+      }
       return;
     }
 
     const output = this._flushQ[0];
+
     if (!output._hasPending()) {
       this._flushQ.shift();
-      this._send(output.stringify());
-      this._checkFlushQ();
+      // handle streaming
+      // if this._context.munchy stream exist, then pipe output to it.
+
+      if (this._context.munchy) {
+        // send output to munchy stream
+        output.sendToMunchy(this._context.munchy, () => this._checkFlushQ());
+      } else {
+        const x = output.stringify();
+
+        if (this._context.send) {
+          this._context.send(x);
+        } else {
+          this._result += x;
+        }
+
+        this._checkFlushQ();
+      }
     }
   }
 }

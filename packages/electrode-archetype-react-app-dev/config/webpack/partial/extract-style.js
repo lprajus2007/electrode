@@ -3,138 +3,203 @@
 const archetype = require("electrode-archetype-react-app/config/archetype");
 const Path = require("path");
 const webpack = require("webpack");
-const glob = require("glob");
 const ExtractTextPlugin = require("extract-text-webpack-plugin");
 const OptimizeCssAssetsPlugin = require("optimize-css-assets-webpack-plugin");
-const CSSSplitPlugin = require("css-split-webpack-plugin").default;
 
 const atImport = require("postcss-import");
-const cssnext = require("postcss-cssnext");
+const postcssPresetEnv = require("postcss-preset-env");
 
-const autoprefixer = require("autoprefixer-stylus");
+const autoprefixer = require("autoprefixer");
 const cssLoader = require.resolve("css-loader");
 const styleLoader = require.resolve("style-loader");
 const stylusLoader = require.resolve("stylus-relative-loader");
 const postcssLoader = require.resolve("postcss-loader");
+const lessLoader = require.resolve("less-loader");
 
-const AppMode = archetype.AppMode;
-
-/**
- * [cssModuleSupport By default, this archetype assumes you are using CSS-Modules + CSS-Next]
+/*
+ * cssModuleSupport: false
  *
- * Stylus is also supported for which the following cases can occur.
+ * - *.css => normal CSS
+ * - *.styl => stylus compiled to normal CSS
+ * - *.scss => SASS compiled to normal CSS
  *
- * case 1: *only* *.css exists => CSS-Modules + CSS-Next
- * case 2: *only* *.styl exists => stylus
- * case 3: *both* *.css & *.styl exists => CSS-Modules + CSS-Next takes priority
- *          with a warning message
- * case 4: *none* *.css & *.styl exists => CSS-Modules + CSS-Next takes priority
- * case 5: *cssModuleStylusSupport* config is true => Use both Stylus and CSS Modules
+ * cssModuleSupport: true
+ *
+ * - *.css => CSS-Modules + CSS-Next
+ * - *.styl => stylus compiled to normal CSS => CSS-Modules + CSS-Next
+ * - *.scss => SASS compiled to normal CSS => CSS-Modules + CSS-Next
+ *
+ * cssModuleSupport: undefined (default)
+ *
+ * - *only* *.css => cssModuleSupport sets to true
+ * - *no* *.css (but *.styl or *.scss) => cssModuleSupport sets to false
  */
 
-const cssNextExists = glob.sync(Path.resolve(AppMode.src.client, "**", "*.css")).length > 0;
-const stylusExists = glob.sync(Path.resolve(AppMode.src.client, "**", "*.styl")).length > 0;
+const cssModuleSupport = archetype.webpack.cssModuleSupport;
+const cssModuleStylusSupport = archetype.webpack.cssModuleStylusSupport;
 
-// By default, this archetype assumes you are using CSS-Modules + CSS-Next
-const cssModuleSupport = !stylusExists && cssNextExists;
+const rules = [];
+
+/*
+ * css Loader
+ */
+const cssQuery = {
+  loader: cssLoader,
+  options: {
+    minimize: true
+  }
+};
+
+/*
+ * css-modules Loader
+ */
+const getCSSModuleOptions = () => {
+  const enableShortenCSSNames = archetype.webpack.enableShortenCSSNames;
+  const enableShortHash = process.env.NODE_ENV === "production" && enableShortenCSSNames;
+  const localIdentName = `${enableShortHash ? "" : "[name]__[local]___"}[hash:base64:5]`;
+
+  return {
+    context: Path.resolve("src"),
+    modules: true,
+    localIdentName
+  };
+};
+
+const cssModuleQuery = {
+  loader: cssLoader,
+  options: getCSSModuleOptions()
+};
+
+/*
+ * postcss Loader
+ *
+ * Note:
+ * - webpack requires an identifier (ident) in options
+ * when {Function}/require is used (Complex Options).
+ */
+const browserslist = ["last 2 versions", "ie >= 9", "> 5%"];
+const postcssQuery = {
+  loader: postcssLoader,
+  options: {
+    ident: "postcss",
+    plugins: loader => [
+      autoprefixer({
+        browsers: browserslist
+      }),
+      atImport({ root: loader.resourcePath }),
+      postcssPresetEnv({ browsers: browserslist })
+    ]
+  }
+};
+
+/*
+ * sass Loader
+ */
+const getSassLoader = () => {
+  if (archetype.options.sass) {
+    const sassLoader = require.resolve("sass-loader");
+    return sassLoader;
+  }
+  return "";
+};
+
+const sassQuery = {
+  loader: getSassLoader()
+};
+
+/*
+ * stylus Loader
+ */
+const stylusQuery = {
+  loader: stylusLoader
+};
+
+const stylusRules = {
+  _name: `extract${cssModuleSupport ? "-css" : ""}-stylus`,
+  test: /\.styl$/,
+  use: ExtractTextPlugin.extract({
+    fallback: styleLoader,
+    use: cssModuleSupport
+      ? [cssModuleQuery, postcssQuery, stylusQuery]
+      : [cssQuery, postcssQuery, stylusQuery],
+    publicPath: ""
+  })
+};
+
+const lessQuery = {
+  loader: lessLoader
+};
+
+const lessRules = {
+  _name: `extract${cssModuleSupport ? "-css" : ""}-less`,
+  test: /\.less$/,
+  use: ExtractTextPlugin.extract({
+    fallback: styleLoader,
+    use: cssModuleSupport
+      ? [cssModuleQuery, postcssQuery, lessQuery]
+      : [cssQuery, postcssQuery, lessQuery],
+    publicPath: ""
+  })
+};
 
 module.exports = function() {
-  const cssModuleStylusSupport = archetype.webpack.cssModuleStylusSupport;
-  const stylusQuery = `${cssLoader}?-autoprefixer!${stylusLoader}`;
-  const cssLoaderOptions =
-    "?modules&localIdentName=[name]__[local]___[hash:base64:5]&-autoprefixer";
-  const cssQuery = `${cssLoader}${cssLoaderOptions}!${postcssLoader}`;
-  const cssStylusQuery = `${cssLoader}${cssLoaderOptions}!${postcssLoader}!${stylusLoader}`;
-  //
-  // Removing ExtratTextPlugin cause stylus to fail
-  // Disable it for now until figure out why and the fix.
-  //
-  // const hmr = process.env.HMR === "true";
-  const hmr = false;
+  rules.push({
+    _name: `extract-css${cssModuleSupport ? "-modules" : ""}`,
+    test: /\.css$/,
+    use: ExtractTextPlugin.extract({
+      fallback: styleLoader,
+      use: cssModuleSupport ? [cssModuleQuery, postcssQuery] : [cssQuery, postcssQuery],
+      publicPath: ""
+    })
+  });
 
-  // By default, this archetype assumes you are using CSS-Modules + CSS-Next
-  const extractLoader = hmr
-    ? `${styleLoader}!${cssQuery}`
-    : ExtractTextPlugin.extract({ fallback: styleLoader, use: cssQuery, publicPath: "" });
-  const rules = [
-    {
-      _name: "extract-css",
-      test: /\.css$/,
-      loader: extractLoader
-    }
-  ];
+  if (archetype.options.sass) {
+    rules.push({
+      _name: `extract${cssModuleSupport ? "-css" : ""}-scss`,
+      test: /\.(scss|sass)$/,
+      use: ExtractTextPlugin.extract({
+        fallback: styleLoader,
+        use: cssModuleSupport
+          ? [cssModuleQuery, postcssQuery, sassQuery]
+          : [cssQuery, postcssQuery, sassQuery],
+        publicPath: ""
+      })
+    });
+  }
 
+  rules.push(stylusRules);
+
+  /*
+   *** cssModuleStylusSupport flag is about to deprecate. ***
+   * If you want to enable stylus with CSS-Modules + CSS-Next,
+   * Please use stylus as your style and enable cssModuleSupport flag instead.
+   */
   if (cssModuleStylusSupport) {
     rules.push({
       _name: "extract-css-stylus",
       test: /\.styl$/,
-      use: ExtractTextPlugin.extract({ fallback: styleLoader, use: cssStylusQuery, publicPath: "" })
-    });
-  } else if (!cssModuleSupport) {
-    rules.push({
-      _name: "extract-stylus",
-      test: /\.styl$/,
-      use: hmr
-        ? `${styleLoader}!${stylusQuery}`
-        : ExtractTextPlugin.extract({ fallback: styleLoader, use: stylusQuery, publicPath: "" })
+      use: ExtractTextPlugin.extract({
+        fallback: styleLoader,
+        use: [cssModuleQuery, postcssQuery, stylusQuery],
+        publicPath: ""
+      })
     });
   }
 
-  if (cssModuleSupport) {
-    rules.push({
-      _name: "postcss",
-      test: /\.scss$/,
-      use: [
-        {
-          loader: "postcss-loader",
-          options: {
-            browsers: ["last 2 versions", "ie >= 9", "> 5%"]
-          }
-        }
-      ]
-    });
-  }
+  rules.push(lessRules);
 
   return {
     module: { rules },
     plugins: [
-      new ExtractTextPlugin({ filename: "[name].style.[hash].css" }),
-      process.env.NODE_ENV === "production" && new OptimizeCssAssetsPlugin(),
-      /*
-       preserve: default: false. Keep the original unsplit file as well.
-       Sometimes this is desirable if you want to target a specific browser (IE)
-       with the split files and then serve the unsplit ones to everyone else.
-       */
-      new CSSSplitPlugin({
-        size: 4000,
-        imports: true,
-        preserve: true,
-        defer: true
+      new ExtractTextPlugin({
+        filename: archetype.babel.hasMultiTargets ? "[name].style.css" : "[name].style.[hash].css"
       }),
+      process.env.NODE_ENV === "production" &&
+        new OptimizeCssAssetsPlugin(archetype.webpack.optimizeCssOptions),
       new webpack.LoaderOptionsPlugin({
+        minimize: true,
         options: {
-          context: Path.resolve(process.cwd(), "src"),
-          postcss: () => {
-            return cssModuleSupport
-              ? [
-                  atImport,
-                  cssnext({
-                    browsers: ["last 2 versions", "ie >= 9", "> 5%"]
-                  })
-                ]
-              : [];
-          },
-          stylus: {
-            use: () => {
-              return !cssModuleSupport
-                ? [
-                    autoprefixer({
-                      browsers: ["last 2 versions", "ie >= 9", "> 5%"]
-                    })
-                  ]
-                : [];
-            }
-          }
+          context: Path.resolve("src")
         }
       })
     ].filter(x => !!x)

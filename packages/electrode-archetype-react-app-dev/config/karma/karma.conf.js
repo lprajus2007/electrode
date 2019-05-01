@@ -1,24 +1,31 @@
 "use strict";
 
 const Path = require("path");
-
-const webpackCfg = require("../webpack/webpack.config.test");
+const loadUserConfig = require("./util/load-user-config");
+const browserSettings = require("./browser-settings");
+const loadElectrodeDll = require("./util/load-electrode-dll");
 
 const MAIN_PATH = require.resolve("./entry.js");
-
 const PREPROCESSORS = {};
 
-const loadUserConfig = require("./util/load-user-config");
-
-const browserSettings = require("./browser-settings");
-
 PREPROCESSORS[MAIN_PATH] = ["webpack", "sourcemap"];
+
+const DLL_PATHS = loadElectrodeDll().map(x => require.resolve(x));
+
+function loadWebpackConfig() {
+  if (!process.env.KARMA_RUN_TYPE) {
+    process.env.KARMA_RUN_TYPE = "base";
+    return require("../webpack/webpack.config.test");
+  }
+
+  return {};
+}
 
 module.exports = function(config) {
   const settings = {
     basePath: process.cwd(),
     frameworks: ["mocha", "intl-shim"],
-    files: [MAIN_PATH],
+    files: DLL_PATHS.concat(MAIN_PATH),
     plugins: [
       "karma-chrome-launcher",
       "karma-coverage",
@@ -36,7 +43,7 @@ module.exports = function(config) {
       "karma-webpack"
     ],
     preprocessors: PREPROCESSORS,
-    webpack: webpackCfg,
+    webpack: loadWebpackConfig(),
     webpackServer: {
       port: 3002, // Choose a non-conflicting port (3000 app, 3001 test dev)
       quiet: false,
@@ -56,7 +63,11 @@ module.exports = function(config) {
     logLevel: config.LOG_INFO,
     colors: true,
     autoWatch: false,
-    reporters: ["spec", "sonarqubeUnit", "coverage"],
+    reporters: [
+      "spec",
+      // "sonarqubeUnit",
+      "coverage"
+    ],
     browserNoActivityTimeout: 60000,
     coverageReporter: {
       reporters: [
@@ -66,13 +77,13 @@ module.exports = function(config) {
       ],
       dir: Path.resolve("coverage", "client")
     },
-    sonarQubeUnitReporter: {
-      sonarQubeVersion: "5.x",
-      outputFile: "gunit.xml",
-      outputDir: Path.resolve("coverage", "client"),
-      overrideTestDescription: true,
-      useBrowserName: false
-    },
+    // sonarQubeUnitReporter: {
+    //   sonarQubeVersion: "5.x",
+    //   outputFile: "gunit.xml",
+    //   outputDir: Path.resolve("coverage", "client"),
+    //   overrideTestDescription: true,
+    //   useBrowserName: false
+    // },
     captureTimeout: 100000,
     singleRun: true
   };

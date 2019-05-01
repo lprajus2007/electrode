@@ -8,9 +8,8 @@ module.exports = () => {
       return "<div>user-token-1</div>";
     },
 
-    "user-token-2": (context, next) => {
+    "user-token-2": context => {
       context.output.add("<div>user-token-2</div>");
-      next();
     },
 
     "user-spot-token": context => {
@@ -34,8 +33,18 @@ module.exports = () => {
       });
     },
 
+    "user-header-token": context => {
+      context.user.response.headers = {
+        "x-foo-bar": "hello-world"
+      };
+    },
+
     PAGE_TITLE: () => {
       return "<title>user-handler-title</title>";
+    },
+
+    TEST_DYNAMIC_2: () => {
+      return "RETURN_BY_TEST_DYANMIC_2";
     }
   };
 };

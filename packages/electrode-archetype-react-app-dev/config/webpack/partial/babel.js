@@ -3,41 +3,44 @@
 const archetype = require("electrode-archetype-react-app/config/archetype");
 const AppMode = archetype.AppMode;
 const Path = require("path");
-const _ = require("lodash");
-const logger = require("electrode-archetype-react-app/lib/logger");
+const identity = require("lodash/identity");
+const assign = require("lodash/assign");
+const babelLoader = require.resolve("babel-loader");
 
 module.exports = function(options) {
-  if (options.HotModuleReload) {
-    require("react-hot-loader/patch");
-  }
-
   const clientVendor = Path.join(AppMode.src.client, "vendor/");
   const babelExclude = x => {
-    if (x.indexOf("/node_modules") >= 0) return true;
+    if (x.indexOf("node_modules") >= 0) return true;
     if (x.indexOf(clientVendor) >= 0) return true;
     return false;
   };
 
-  const babelLoader = {
+  const test = archetype.babel.enableTypeScript ? /\.[tj]sx?$/ : /\.jsx?$/;
+
+  const babelLoaderConfig = {
     _name: "babel",
-    test: /\.jsx?$/,
+    test,
     exclude: babelExclude,
     use: [
       {
-        loader: "babel-loader",
-        options: options.babel
+        loader: babelLoader,
+        options: Object.assign(
+          { cacheDirectory: Path.resolve(".etmp/babel-loader") },
+          options.babel
+        )
       }
-    ].filter(_.identity)
+    ].filter(identity)
   };
-
-  if (options.HotModuleReload) {
-    logger.info("Enabling Hot Module Reload support in webpack babel loader");
-    babelLoader.include = Path.resolve(AppMode.src.client);
-  }
 
   return {
     module: {
-      rules: [_.assign({}, babelLoader, archetype.webpack.extendBabelLoader)]
+      rules: [
+        assign(
+          {},
+          babelLoaderConfig,
+          archetype.babel.hasMultiTargets ? archetype.babel.extendLoader : {}
+        )
+      ]
     }
   };
 };

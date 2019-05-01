@@ -1,14 +1,18 @@
-<!DOCTYPE html>
 <!--%{INITIALIZE}-->
+<!DOCTYPE html>
+
 <html lang="en">
 
 <head>
+  <!--%{HEAD_INITIALIZE}-->
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <!--%{META_TAGS}-->
   <!--%{PAGE_TITLE}-->
   <!--%{CRITICAL_CSS}-->
+  <!--%{APP_CONFIG_DATA}-->
   <!--%{WEBAPP_HEADER_BUNDLES}-->
+  <!--%{WEBAPP_DLL_BUNDLES}-->
 </head>
 <!--%{HEAD_CLOSED}-->
 
@@ -19,9 +23,7 @@
   <!--%{AFTER_SSR_CONTENT}-->
   <!--%{PREFETCH_BUNDLES}-->
   <!--%{WEBAPP_BODY_BUNDLES}-->
-  <script>
-    if (window.webappStart) webappStart();
-  </script>
+  <!--%{WEBAPP_START_SCRIPT}-->
   <noscript>
     <h4>JavaScript is Disabled</h4>
     <p>Sorry, this webpage requires JavaScript to function correctly.</p>

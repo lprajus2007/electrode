@@ -1,6 +1,6 @@
 {
   "name": "electrode-archetype-react-component",
-  "version": "5.0.3",
+  "version": "6.1.4",
   "description": "Archetype - Electrode Component",
   "homepage": "http://www.electrode.io",
   "repository": {
@@ -18,6 +18,11 @@
   "license": "Apache-2.0",
   "main": "archetype-clap.js",
   "scripts": {},
+  "files": [
+    "config",
+    "archetype-clap.js",
+    "require.js"
+  ],
   "devDependencies": {
     "eslint": "^4.4.1",
     "eslint-config-walmart": "^1.1.0",
@@ -28,10 +33,17 @@
     "xclap": "^0.2.0"
   },
   "optionalDependencies": {
-    "electrode-archetype-opt-react": "^1.0.0"
+    "electrode-archetype-opt-inferno": "^0.2.3",
+    "electrode-archetype-opt-react": "^1.0.1"
   },
   "engines": {
-    "node": ">= 6 <= 8",
-    "npm": ">= 3 <= 5"
+    "node": ">= 6",
+    "npm": ">= 3"
+  },
+  "fyn": {
+    "optionalDependencies": {
+      "electrode-archetype-opt-inferno": "../electrode-archetype-opt-inferno",
+      "electrode-archetype-opt-react": "../electrode-archetype-opt-react"
+    }
   }
 }

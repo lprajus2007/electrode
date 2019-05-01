@@ -16,18 +16,34 @@ const Path = require("path");
 
 const serverDir = process.argv[2] || "src/server";
 
+let start;
+
 try {
   // Try to load user's dev.js under src/server
-  require(Path.resolve(serverDir, "dev.js"));
+  start = require(Path.resolve(serverDir, "dev.js"));
 } catch (e) {
+  const archetype = require("../config/archetype");
   const cwdNM = Path.resolve("node_modules");
   const cwd = process.cwd();
 
   // fallback to default action that loads babel-register and then requires
   // src/server, under which there should be an index.js file.
-  require("babel-register")({ only: x => {
-    x = Path.normalize(x);
-    return x.startsWith(cwd) && !x.startsWith(cwdNM);
-  }});
-  require(Path.resolve(serverDir));
+  archetype.devRequire("@babel/register")({
+    only: [
+      x => {
+        x = Path.normalize(x);
+        return x.startsWith(cwd) && !x.startsWith(cwdNM);
+      }
+    ],
+    extensions: [".js", ".jsx"]
+      .concat(archetype.babel.enableTypeScript && [".ts", ".tsx"])
+      .filter(x => x),
+    cache: true
+  });
+  const fullServerDir = Path.resolve(serverDir);
+  start = require(fullServerDir);
+}
+
+if (typeof start === "function") {
+  start();
 }
